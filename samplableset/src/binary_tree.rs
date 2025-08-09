@@ -1,3 +1,25 @@
+// MIT License
+//
+// Copyright (c) 2025 Jai Veilleux
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 use std::{
     cell::RefCell, collections::HashMap, ops::Deref, rc::{Rc, Weak}
 };
@@ -6,6 +28,11 @@ type LeafIdx = usize;
 
 #[derive(Debug, Clone)]
 pub struct NodeRef(Rc<RefCell<BTreeNode>>);
+
+#[derive(Debug)]
+pub struct WeakNodeRef(Weak<RefCell<BTreeNode>>);
+
+// ==============================================
 
 impl NodeRef {
     pub fn new(node: BTreeNode) -> Self {
@@ -25,8 +52,7 @@ impl Deref for NodeRef {
     }
 }
 
-#[derive(Debug)]
-pub struct WeakNodeRef(Weak<RefCell<BTreeNode>>);
+// ==============================================
 
 impl WeakNodeRef {
     pub fn new() -> Self {
@@ -46,6 +72,8 @@ impl Deref for WeakNodeRef {
     }
 }
 
+// ==============================================
+
 #[derive(Debug)]
 pub struct BTreeNode {
     val: f64,
@@ -64,6 +92,8 @@ impl BTreeNode {
         }
     }
 }
+
+// ==============================================
 
 pub struct BinaryTree {
     root_: Option<NodeRef>,
@@ -322,7 +352,7 @@ impl<T: Into<u32>> From<T> for BinaryTree {
 
 impl Clone for BinaryTree {
     /// !!! DOES NOT BEHAVE LIKE NORMAL RUST CLONING OF POINTERS !!!
-    /// Deep copies the BinaryTree, creating a replica pointing at new nodes
+    /// Deep copies the BinaryTree, creating a replica pointing at new data
     fn clone(&self) -> Self {
         let n_leaves = self.leaves_.len();
         assert!(n_leaves > 0, "BinaryTree must have at least one leaf");
@@ -359,12 +389,7 @@ impl Clone for BinaryTree {
     }
 }
 
-impl PartialEq for BinaryTree {
-    fn eq(&self, other: &Self) -> bool {
-        
-        false
-    }
-}
+// ==============================================
 
 #[cfg(test)]
 mod tests {
