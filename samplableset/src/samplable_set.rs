@@ -145,12 +145,19 @@ where
         if self.empty() {
             return None;
         }
-        // ..= for inclusive range
-        let r_grp: f64 = self.rng_.random_range(0.0..=1.0);
+
+        let total = self.total_weight();
+        // TODO: this shouldn't be possible, ensure guarantees then remove
+        if !total.is_finite() || total <= 0.0 {
+            return None;
+        }
+
+        let r_grp: f64 = self.rng_.random_range(0.0..1.0);
         let grp_idx: GroupIndex = self.sampling_tree_.get_leaf_idx(Some(r_grp));
 
         // In valid structure, groups indexed by leaves are non-empty
-        let grp_len = self.propensity_group_vec_[grp_idx].len();
+        let grp = &self.propensity_group_vec_[grp_idx];
+        let grp_len = grp.len();
         if grp_len == 0 {
             // If this ever happens, the tree/groups are out of sync.
             // TODO panic or error instead? should never have an empty SamplableSet
@@ -159,17 +166,17 @@ where
 
         let m_k = self.max_propensity_vec_[grp_idx];
         loop {
-            let u: f64 = self.rng_.random_range(0.0..=1.0);
-            let in_grp_idx: InGroupIndex = (u * grp_len as f64).floor() as InGroupIndex;
+            let u: f64 = self.rng_.random_range(0.0..grp_len as f64);
+            let in_grp_idx: InGroupIndex = (u as f64).floor() as InGroupIndex;
 
-            let (elem, w) = {
-                let pair = &self.propensity_group_vec_[grp_idx][in_grp_idx];
-                (pair.0.clone(), pair.1)
+            let (elem, weight) = {
+                let (e, w) = &grp[in_grp_idx];
+                (e.clone(), *w)
             };
 
-            let u_acc: f64 = self.rng_.random_range(0.0..=1.0);
-            if u_acc < w / m_k {
-                return Some((elem, w));
+            let u_acc: f64 = self.rng_.random_range(0.0..1.0);
+            if u_acc < (weight / m_k) {
+                return Some((elem, weight));
             }
             // Expected O(1) retries
         }
@@ -180,6 +187,12 @@ where
         R: Rng + ?Sized,
     {
         if self.empty() {
+            return None;
+        }
+
+        let total = self.total_weight();
+        // TODO: this shouldn't be possible, ensure guarantees then remove
+        if !total.is_finite() || total <= 0.0 {
             return None;
         }
 
@@ -194,17 +207,17 @@ where
 
         let m_k = self.max_propensity_vec_[grp_idx];
         loop {
-            let u: f64 = generator.random_range(0.0..=1.0);
+            let u: f64 = generator.random_range(0.0..=grp_len as f64);
             let in_grp_idx: InGroupIndex = (u * grp_len as f64).floor() as InGroupIndex;
 
-            let (elem, w) = {
-                let pair = &grp[in_grp_idx];
-                (pair.0.clone(), pair.1)
+            let (elem, weight) = {
+                let (e, w) = &grp[in_grp_idx];
+                (e.clone(), *w)
             };
 
-            let u_acc: f64 = generator.random_range(0.0..=1.0);
-            if u_acc < w / m_k {
-                return Some((elem, w));
+            let u_acc: f64 = generator.random_range(0.0..1.0);
+            if u_acc < (weight / m_k) {
+                return Some((elem, weight));
             }
         }
     }
