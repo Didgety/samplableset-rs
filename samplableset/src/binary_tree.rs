@@ -496,7 +496,10 @@ mod tests {
         assert!(!bt.is_root());
         bt.move_up();
         // back at root
-        assert_eq!(Rc::as_ptr(bt.cur_node_.as_ref().unwrap()) as usize, root_ptr);
+        assert_eq!(
+            Rc::as_ptr(bt.cur_node_.as_ref().unwrap()) as usize,
+            root_ptr
+        );
         bt.move_down_right();
         assert!(!bt.is_root());
     }
@@ -561,7 +564,11 @@ mod tests {
             let _ignored = bt.get_leaf_idx(Some(r)); // return value currently unused (always 0)
             // After traversal, cur_node_ is at the leaf; get actual index via None path
             let leaf_idx = bt.get_leaf_idx(None);
-            assert_eq!(leaf_idx, expected_leaf, "r={} expected leaf {}", r, expected_leaf);
+            assert_eq!(
+                leaf_idx, expected_leaf,
+                "r={} expected leaf {}",
+                r, expected_leaf
+            );
         };
         // cumulative probs: [0.1, 0.3, 0.6, 1.0]
         check(0.05, 0);
