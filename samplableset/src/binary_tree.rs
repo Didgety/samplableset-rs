@@ -164,7 +164,9 @@ impl BinaryTree {
                         self.move_down_right();
                     }
                 }
-                0
+                let chosen_leaf: LeafIdx = self.get_leaf_idx(None);
+                self.reset_cur_node();
+                chosen_leaf
             }
             None => {
                 let n = self.cur_node_.as_ref().expect("current_node_ is None");
@@ -558,17 +560,17 @@ mod tests {
         for (i, w) in [1.0, 2.0, 3.0, 4.0].iter().enumerate() {
             bt.update_value(*w, Some(i));
         }
-        // Helper closure to test traversal
+        // Helper closure to test traversal (get_leaf_idx(Some(r)) now returns the chosen leaf)
         let mut check = |r: f64, expected_leaf: usize| {
             bt.reset_cur_node();
-            let _ignored = bt.get_leaf_idx(Some(r)); // return value currently unused (always 0)
-            // After traversal, cur_node_ is at the leaf; get actual index via None path
-            let leaf_idx = bt.get_leaf_idx(None);
+            let leaf_idx = bt.get_leaf_idx(Some(r));
             assert_eq!(
                 leaf_idx, expected_leaf,
                 "r={} expected leaf {}",
                 r, expected_leaf
             );
+            // cur_node_ reset to root by get_leaf_idx(Some(_)) implementation
+            assert!(bt.is_root());
         };
         // cumulative probs: [0.1, 0.3, 0.6, 1.0]
         check(0.05, 0);
