@@ -29,19 +29,31 @@ use std::{
 
 type LeafIdx = usize;
 
+#[doc(hidden)]
+/// A strong reference to a `BTreeNode`.
 #[derive(Debug, Clone)]
-pub struct NodeRef(Rc<RefCell<BTreeNode>>);
+pub(crate) struct NodeRef(Rc<RefCell<BTreeNode>>);
 
+#[doc(hidden)]
+/// A weak reference to a `BTreeNode`.
 #[derive(Debug)]
-pub struct WeakNodeRef(Weak<RefCell<BTreeNode>>);
+pub(crate) struct WeakNodeRef(Weak<RefCell<BTreeNode>>);
 
 // ==============================================
 
 impl NodeRef {
+    #[doc(hidden)]
+    /// Creates a new `NodeRef`.
+    /// 
+    /// Acts like a `Rc<RefCell<BTreeNode>>`
     pub fn new(node: BTreeNode) -> Self {
         NodeRef(Rc::new(RefCell::new(node)))
     }
 
+    #[doc(hidden)]
+    /// Downgrades the strong reference to a weak reference.
+    /// 
+    /// NodeRef -> WeakNodeRef
     pub fn downgrade(&self) -> WeakNodeRef {
         WeakNodeRef(Rc::downgrade(&self))
     }
@@ -58,10 +70,18 @@ impl Deref for NodeRef {
 // ==============================================
 
 impl WeakNodeRef {
+    #[doc(hidden)]
+    /// Creates a new, empty `WeakNodeRef`.
+    /// 
+    /// Acts like a `Weak<RefCell<BTreeNode>>`
     pub fn new() -> Self {
         WeakNodeRef(Weak::new())
     }
 
+    #[doc(hidden)]
+    /// Upgrades the weak reference to a strong reference, if the node is still alive.
+    /// 
+    /// WeakNodeRef -> NodeRef
     pub fn upgrade(&self) -> Option<NodeRef> {
         self.0.upgrade().map(NodeRef)
     }
@@ -78,7 +98,7 @@ impl Deref for WeakNodeRef {
 // ==============================================
 
 #[derive(Debug)]
-pub struct BTreeNode {
+pub(crate) struct BTreeNode {
     val: f64,
     parent: WeakNodeRef,
     left: Option<NodeRef>,
@@ -86,6 +106,8 @@ pub struct BTreeNode {
 }
 
 impl BTreeNode {
+    #[doc(hidden)]
+    /// Creates a new, empty `BTreeNode`.
     pub fn new() -> Self {
         Self {
             val: 0.0,
@@ -98,8 +120,10 @@ impl BTreeNode {
 
 // ==============================================
 
+#[doc(hidden)]
+/// A binary tree.
 #[derive(Debug)]
-pub struct BinaryTree {
+pub(crate) struct BinaryTree {
     root_: Option<NodeRef>,
     cur_node_: Option<NodeRef>,
     leaves_: Vec<NodeRef>,
@@ -107,6 +131,8 @@ pub struct BinaryTree {
 }
 
 impl BinaryTree {
+    #[doc(hidden)]
+    /// Creates a new, empty `BinaryTree`.
     pub fn new() -> Self {
         BinaryTree {
             root_: None,
@@ -116,6 +142,8 @@ impl BinaryTree {
         }
     }
 
+    #[doc(hidden)]
+    /// Returns true if the current node is the root.
     pub fn is_root(&self) -> bool {
         self.cur_node_
             .as_ref()
@@ -123,6 +151,8 @@ impl BinaryTree {
             .map_or(false, |n| n.borrow().parent.upgrade().is_none())
     }
 
+    #[doc(hidden)]
+    /// Returns true if the current node is a leaf.
     pub fn is_leaf(&self) -> bool {
         self.cur_node_
             .as_ref()
@@ -133,24 +163,32 @@ impl BinaryTree {
             })
     }
 
+    #[doc(hidden)]
+    /// Returns the value of the current node, if it exists.
     pub fn get_val(&self) -> Option<f64> {
         self.cur_node_
             .as_ref()
             .map_or(None, |n| Some(n.borrow().val))
     }
 
+    #[doc(hidden)]
+    /// Returns the value of the left child, if it exists.
     pub fn get_left_val(&self) -> Option<f64> {
         self.cur_node_
             .as_ref()
             .and_then(|n| n.borrow().left.as_ref().map(|l| l.borrow().val))
     }
 
+    #[doc(hidden)]
+    /// Returns the value of the right child, if it exists.
     pub fn get_right_val(&self) -> Option<f64> {
         self.cur_node_
             .as_ref()
             .and_then(|n| n.borrow().right.as_ref().map(|r| r.borrow().val))
     }
 
+    #[doc(hidden)]
+    /// Returns the index of the leaf node corresponding to the given value
     pub fn get_leaf_idx(&mut self, r: Option<f64>) -> LeafIdx {
         match r {
             Some(r_val) => {
@@ -179,10 +217,14 @@ impl BinaryTree {
         }
     }
 
+    #[doc(hidden)]
+    /// Resets the current node to the root
     pub fn reset_cur_node(&mut self) {
         self.cur_node_ = self.root_.clone();
     }
 
+    #[doc(hidden)]
+    /// Current node becomes its left child
     pub fn move_down_left(&mut self) {
         let next = self
             .cur_node_
@@ -195,6 +237,8 @@ impl BinaryTree {
         self.cur_node_ = Some(next);
     }
 
+    #[doc(hidden)]
+    /// Current node becomes its right child
     pub fn move_down_right(&mut self) {
         let next = self
             .cur_node_
@@ -207,6 +251,8 @@ impl BinaryTree {
         self.cur_node_ = Some(next);
     }
 
+    #[doc(hidden)]
+    /// Current node becomes its parent
     pub fn move_up(&mut self) {
         let next = {
             let cur = self.cur_node_.as_ref().expect("current node is None");
@@ -220,10 +266,14 @@ impl BinaryTree {
         self.cur_node_ = Some(next);
     }
 
+    #[doc(hidden)]
+    /// Current node becomes the specified node.
     pub fn move_to(&mut self, node: NodeRef) {
         self.cur_node_ = Some(node);
     }
 
+    #[doc(hidden)]
+    /// Updates the value of a leaf node.
     pub fn update_value(&mut self, variation: f64, idx: Option<LeafIdx>) {
         match idx {
             Some(leaf_idx) => {
@@ -245,6 +295,8 @@ impl BinaryTree {
         }
     }
 
+    #[doc(hidden)]
+    /// Helper function to update the value of the current node.
     fn _update_helper(&mut self, variation: f64) {
         {
             let cur = self
@@ -265,6 +317,8 @@ impl BinaryTree {
         }
     }
 
+    #[doc(hidden)]
+    /// Zeros the value of the current node.
     pub fn update_zero(&mut self) {
         if !self.is_leaf() {
             println!("Cannot zero: current node is not a leaf");
@@ -284,6 +338,8 @@ impl BinaryTree {
         }
     }
 
+    #[doc(hidden)]
+    /// Zeros all leaves in the tree
     pub fn clear(&mut self) {
         let leaves = self.leaves_.clone();
         for leaf in leaves {
@@ -292,6 +348,8 @@ impl BinaryTree {
         }
     }
 
+    #[doc(hidden)]
+    /// Creates a new branch in the tree.
     fn branch(&mut self, parent: NodeRef, node_idx: u32, n_nodes: u32) -> Option<NodeRef> {
         if node_idx < n_nodes {
             let child = NodeRef::new(BTreeNode {
@@ -362,6 +420,7 @@ impl<T: Into<u32>> From<T> for BinaryTree {
 }
 
 impl Clone for BinaryTree {
+    #[doc(hidden)]
     /// !!! DOES NOT BEHAVE LIKE NORMAL RUST CLONING OF POINTERS !!!
     /// Deep copies the BinaryTree, creating a replica pointing at new data
     fn clone(&self) -> Self {

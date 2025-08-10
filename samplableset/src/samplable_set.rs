@@ -20,7 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// use
 use rand::{Rng, SeedableRng};
 use rand_pcg::Pcg32 as RNGType;
 
@@ -28,8 +27,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use crate::BinaryTree;
-use crate::HashPropensity;
+use crate::binary_tree::BinaryTree;
+use crate::hash_propensity::HashPropensity;
 
 type GroupIndex = usize;
 type InGroupIndex = usize;
@@ -78,22 +77,19 @@ where
     rng_: RNGType,
 
     hash_: HashPropensity,
-    // TODO remove this variable
-    num_groups_: u32,
     max_propensity_vec_: Vec<f64>,
 
     pos_map_: HashMap<T, SSetPosition>,
     sampling_tree_: BinaryTree,
 
     propensity_group_vec_: Vec<PropensityGroup<T>>,
-    // iterator_: Option<InGroupIndex>,
-    // iterator_group_index_: Option<GroupIndex>
 }
 
 impl<T> SamplableSet<T>
 where
     T: Clone + Eq + Hash,
 {
+    /// Creates a new, empty `SamplableSet`.
     pub fn new(min_weight: f64, max_weight: f64) -> Self {
         assert!(min_weight > 0.0 && max_weight.is_finite() && max_weight > min_weight);
 
@@ -120,7 +116,6 @@ where
             // random_01_: Uniform::new(0.0, 1.0).unwrap(),
             rng_: RNGType::from_os_rng(),
             hash_: hash,
-            num_groups_: num_groups,
             max_propensity_vec_: max_propensity_vec,
             pos_map_: HashMap::new(),
             sampling_tree_: sampling_tree,
@@ -128,19 +123,23 @@ where
         }
     }
 
+    /// Returns the number of elements in the set.
     pub fn size(&self) -> usize {
         self.pos_map_.len()
     }
 
+    /// Returns true if the set is empty.
     pub fn empty(&self) -> bool {
         self.pos_map_.is_empty()
     }
 
     #[inline]
+    /// Checks if the element exists in the set.
     pub fn exists(&self, element: &T) -> bool {
         self.pos_map_.contains_key(element)
     }
 
+    /// Samples an item from the set using the built-in random number generator.
     pub fn sample(&mut self) -> Option<(T, f64)> {
         if self.empty() {
             return None;
@@ -182,6 +181,7 @@ where
         }
     }
 
+    /// Samples an item from the set using the provided external random number generator.
     pub fn sample_ext_rng<R>(&mut self, generator: &mut R) -> Option<(T, f64)>
     where
         R: Rng + ?Sized,
@@ -223,11 +223,13 @@ where
     }
 
     // TODO this requires a guarantee that cur_node is always root_
+    /// Returns the total weight of the set.
     pub fn total_weight(&self) -> f64 {
         self.sampling_tree_.get_val().unwrap()
     }
 
     // TODO add errors instead of panics
+    /// Returns the weight of the given element, if it exists.
     pub fn get_weight(&self, element: &T) -> f64 {
         let &(g, i) = self
             .pos_map_
@@ -237,6 +239,7 @@ where
     }
 
     // TODO add errors and Oks
+    /// Inserts an element into the set with the given weight.
     pub fn insert(&mut self, element: &T, weight: f64) {
         self.weight_check(weight);
 
@@ -266,6 +269,7 @@ where
         ()
     }
 
+    /// Erases an element from the set, if it exists.
     pub fn erase(&mut self, element: &T) {
         if self.exists(element) {
             let (grp_idx, in_grp_idx) = match self.pos_map_.get(element) {
@@ -293,6 +297,7 @@ where
         }
     }
 
+    /// Clears all elements from the set.
     pub fn clear(&mut self) {
         self.sampling_tree_.clear();
         self.pos_map_.clear();
@@ -303,6 +308,8 @@ where
         ()
     }
 
+    #[doc(hidden)]
+    /// Checks that the weight is within the allowed bounds.
     fn weight_check(&self, weight: f64) {
         if weight < self.min_weight_ || weight > self.max_weight_ {
             // TODO replace with error
@@ -325,6 +332,7 @@ where
     type Item = (&'a T, f64);
     type IntoIter = SeqSamplableIter<'a, T>;
 
+    /// Returns an iterator over the items in the set
     fn into_iter(self) -> Self::IntoIter {
         let mut it = SeqSamplableIter {
             groups: &self.propensity_group_vec_,
@@ -344,6 +352,8 @@ impl<T> SamplableSet<T>
 where
     T: Clone + Eq + Hash,
 {
+    /// Returns an iterator that lazily samples `n` items from the set
+    /// using the built in random number generator
     pub fn into_sampling_iter<'a>(&'a mut self, n: usize) -> SamplingIter<'a, T> {
         SamplingIter {
             set: self,
@@ -351,6 +361,8 @@ where
         }
     }
 
+    /// Returns an iterator that lazily samples `n` items from the set
+    /// given an external random number generator
     pub fn into_ext_sampling_iter<'a, R>(
         &'a mut self,
         generator: &'a mut R,
@@ -382,6 +394,8 @@ where
 {
     type Item = (&'a T, f64);
 
+    /// Returns the next item sequentially from the set
+    /// or None if there are no more items
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             if self.cur_grp >= self.groups.len() {
@@ -420,6 +434,9 @@ where
 {
     type Item = (T, f64);
 
+    /// Returns the next sampled item from the set
+    /// using the built in random number generator
+    /// or None if there are no samples remaining 
     fn next(&mut self) -> Option<Self::Item> {
         if self.remaining == 0 {
             return None;
@@ -447,6 +464,9 @@ where
     // type Item = SSetResult<(T, f64)>;
     type Item = (T, f64);
 
+    /// Returns the next sampled item from the set,
+    /// using the provided external random number generator
+    /// or None if there are no samples remaining
     fn next(&mut self) -> Option<Self::Item> {
         if self.remaining == 0 {
             return None;
@@ -467,8 +487,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    // use rand::SeedableRng;
-    // use rand_pcg::Pcg32 as RNGType;
 
     fn approx_eq(a: f64, b: f64, eps: f64) -> bool { (a - b).abs() <= eps }
 

@@ -20,8 +20,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#[doc(hidden)]
+/// A struct that holds the propensity values for hashing.
 #[derive(Debug, Clone)]
-pub struct HashPropensity {
+pub(crate) struct HashPropensity {
     propensity_min_: f64,
     propensity_max_: f64,
     power_of_two_: bool,
@@ -29,6 +31,14 @@ pub struct HashPropensity {
 }
 
 impl HashPropensity {
+    #[doc(hidden)]
+    /// Creates a new `HashPropensity`.
+    /// 
+    /// # Panics
+    ///
+    /// Panics if `propensity_min` is not positive, 
+    /// `propensity_max` is not finite, or if 
+    /// `propensity_max` is less than or equal to `propensity_min`.
     pub fn new(propensity_min: f64, propensity_max: f64) -> Self {
         assert!(
             propensity_max.is_finite() && propensity_min > 0.0,
@@ -39,12 +49,7 @@ impl HashPropensity {
             "Propensity max must be finite and greater than min"
         ); // TODO does it HAVE to be greater than min?
 
-        let is_pow_two = is_pow_two_f64(propensity_max / propensity_min);
-        // f64::floor(f64::log2(
-        //     propensity_max / propensity_min
-        // )) == f64::ceil(f64::log2(
-        //     propensity_max / propensity_min
-        // ));
+        let is_pow_two = is_pow_two_f64(propensity_max / propensity_min);        
 
         HashPropensity {
             propensity_min_: propensity_min,
@@ -53,6 +58,8 @@ impl HashPropensity {
         }
     }
 
+    #[doc(hidden)]
+    /// Returns the index of the given propensity.
     #[inline]
     pub fn operator(&self, propensity: f64) -> usize {
         // TODO handle case where propensity < self.propensity_min_
@@ -66,16 +73,31 @@ impl HashPropensity {
     }
 }
 
+#[doc(hidden)]
+/// Checks if a number is a power of two.
+/// Only works for positive numbers
+///
+/// ```rust,ignore
+/// // IEEE-754: a power of two has zero mantissa bits.
+/// bits = x.to_bits();
+/// exp = (bits >> 52) & 0x7FF;
+/// mant = bits & ((1u64 << 52) - 1);
+/// exp != 0 && exp != 0x7ff && mant == 0
+/// ```
+/// 
+/// Equivalent to
+/// ```rust,ignore
+/// f64::floor(f64::log2(
+///     propensity_max / propensity_min
+/// )) == f64::ceil(f64::log2(
+///     propensity_max / propensity_min
+/// ));
+/// ```
 #[inline]
 fn is_pow_two_f64(x: f64) -> bool {
     if !(x.is_finite()) || x <= 0.0 {
         return false;
-    }
-    // IEEE-754: a power of two has zero mantissa bits.
-    // let bits = x.to_bits();
-    // let exp = (bits >> 52) & 0x7FF;
-    // let mant = bits & ((1u64 << 52) - 1);
-    // exp != 0 && exp != 0x7ff && mant == 0
+    }    
     (x.to_bits() & ((1u64 << 52) - 1)) == 0
 }
 

@@ -1,9 +1,8 @@
 mod binary_tree;
 mod hash_propensity;
-mod samplable_set;
+pub mod samplable_set;
 
-use binary_tree::BinaryTree;
-use hash_propensity::HashPropensity;
+pub use samplable_set::SamplableSet;
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right
