@@ -21,7 +21,10 @@
 // SOFTWARE.
 
 use std::{
-    cell::RefCell, collections::HashMap, ops::Deref, rc::{Rc, Weak}
+    cell::RefCell,
+    collections::HashMap,
+    ops::Deref,
+    rc::{Rc, Weak},
 };
 
 type LeafIdx = usize;
@@ -95,11 +98,12 @@ impl BTreeNode {
 
 // ==============================================
 
+#[derive(Debug)]
 pub struct BinaryTree {
     root_: Option<NodeRef>,
     cur_node_: Option<NodeRef>,
     leaves_: Vec<NodeRef>,
-    leaves_idx_map_: HashMap<usize, LeafIdx>
+    leaves_idx_map_: HashMap<usize, LeafIdx>,
 }
 
 impl BinaryTree {
@@ -108,7 +112,7 @@ impl BinaryTree {
             root_: None,
             cur_node_: None,
             leaves_: Vec::new(),
-            leaves_idx_map_: HashMap::new()
+            leaves_idx_map_: HashMap::new(),
         }
     }
 
@@ -116,8 +120,7 @@ impl BinaryTree {
         self.cur_node_
             .as_ref()
             // default to false if cur_node_ is None
-            .map_or(false, |n| 
-                n.borrow().parent.upgrade().is_none())
+            .map_or(false, |n| n.borrow().parent.upgrade().is_none())
     }
 
     pub fn is_leaf(&self) -> bool {
@@ -130,7 +133,7 @@ impl BinaryTree {
             })
     }
 
-    pub fn get_val(&self) -> Option<f64> {       
+    pub fn get_val(&self) -> Option<f64> {
         self.cur_node_
             .as_ref()
             .map_or(None, |n| Some(n.borrow().val))
@@ -148,7 +151,7 @@ impl BinaryTree {
             .and_then(|n| n.borrow().right.as_ref().map(|r| r.borrow().val))
     }
 
-    pub fn get_leaf_idx(&mut self, r: Option<f64>) -> LeafIdx {        
+    pub fn get_leaf_idx(&mut self, r: Option<f64>) -> LeafIdx {
         match r {
             Some(r_val) => {
                 let mut cumul: f64 = 0.0;
@@ -171,7 +174,7 @@ impl BinaryTree {
                     .get(&key)
                     .expect("current_node_ is not a leaf (no leaf index)")
             }
-        }                
+        }
     }
 
     pub fn reset_cur_node(&mut self) {
@@ -179,7 +182,10 @@ impl BinaryTree {
     }
 
     pub fn move_down_left(&mut self) {
-        let next = self.cur_node_.as_ref().expect("current node is None")
+        let next = self
+            .cur_node_
+            .as_ref()
+            .expect("current node is None")
             .borrow()
             .left
             .clone()
@@ -188,7 +194,10 @@ impl BinaryTree {
     }
 
     pub fn move_down_right(&mut self) {
-        let next = self.cur_node_.as_ref().expect("current node is None")
+        let next = self
+            .cur_node_
+            .as_ref()
+            .expect("current node is None")
             .borrow()
             .right
             .clone()
@@ -198,8 +207,8 @@ impl BinaryTree {
 
     pub fn move_up(&mut self) {
         let next = {
-        let cur = self.cur_node_.as_ref().expect("current node is None");
-        let parent_rc = cur
+            let cur = self.cur_node_.as_ref().expect("current node is None");
+            let parent_rc = cur
                 .borrow()
                 .parent
                 .upgrade()
@@ -324,14 +333,14 @@ impl<T: Into<u32>> From<T> for BinaryTree {
         if n_leaves < 1 {
             panic!("BinaryTree must have at least one leaf");
         }
-        
+
         let root = NodeRef::new(BTreeNode::new());
-        
+
         let mut tree = BinaryTree {
             root_: Some(root.clone()),
             cur_node_: Some(root.clone()),
             leaves_: Vec::with_capacity(n_leaves as usize),
-            leaves_idx_map_: HashMap::new()
+            leaves_idx_map_: HashMap::new(),
         };
 
         let n_nodes = n_leaves
@@ -363,9 +372,9 @@ impl Clone for BinaryTree {
             root_: Some(root.clone()),
             cur_node_: Some(root.clone()),
             leaves_: Vec::with_capacity(n_leaves),
-            leaves_idx_map_: HashMap::new()
+            leaves_idx_map_: HashMap::new(),
         };
-        
+
         let n_nodes = (n_leaves as u32)
             .checked_mul(2)
             .and_then(|v| v.checked_sub(1))
@@ -468,5 +477,108 @@ mod tests {
     #[should_panic]
     fn test_binary_tree_from_zero_leaves_panics() {
         let _ = BinaryTree::from(0u32);
+    }
+
+    #[test]
+    fn test_new_empty_builder() {
+        let bt = BinaryTree::new();
+        assert!(bt.root_.is_none());
+        assert!(bt.cur_node_.is_none());
+        assert_eq!(bt.leaves_.len(), 0);
+    }
+
+    #[test]
+    fn test_navigation_moves() {
+        let mut bt = BinaryTree::from(4u32);
+        bt.reset_cur_node();
+        let root_ptr = Rc::as_ptr(bt.root_.as_ref().unwrap()) as usize;
+        bt.move_down_left();
+        assert!(!bt.is_root());
+        bt.move_up();
+        // back at root
+        assert_eq!(Rc::as_ptr(bt.cur_node_.as_ref().unwrap()) as usize, root_ptr);
+        bt.move_down_right();
+        assert!(!bt.is_root());
+    }
+
+    #[test]
+    fn test_get_left_right_val_after_updates() {
+        let mut bt = BinaryTree::from(4u32);
+        // Set two leftmost leaves (indices 0,1) and two rightmost (2,3)
+        bt.update_value(1.0, Some(0));
+        bt.update_value(2.0, Some(1));
+        bt.update_value(3.0, Some(2));
+        bt.update_value(4.0, Some(3));
+        bt.reset_cur_node();
+        let left_sum = bt.get_left_val().unwrap();
+        let right_sum = bt.get_right_val().unwrap();
+        assert_eq!(left_sum + right_sum, bt.get_val().unwrap());
+        assert_eq!(bt.get_val().unwrap(), 10.0);
+    }
+
+    #[test]
+    fn test_update_value_none_path_on_leaf() {
+        let mut bt = BinaryTree::from(2u32);
+        // start root -> left leaf
+        bt.move_down_left();
+        assert!(bt.is_leaf());
+        bt.update_value(5.0, None); // should update leaf and propagate
+        bt.reset_cur_node();
+        assert_eq!(bt.get_val().unwrap(), 5.0);
+    }
+
+    #[test]
+    fn test_move_to_specific_leaf() {
+        let mut bt = BinaryTree::from(4u32);
+        let target_leaf = bt.leaves_[2].clone();
+        bt.move_to(target_leaf.clone());
+        assert!(bt.is_leaf());
+        let cur_ptr = Rc::as_ptr(bt.cur_node_.as_ref().unwrap()) as usize;
+        let tgt_ptr = Rc::as_ptr(&target_leaf) as usize;
+        assert_eq!(cur_ptr, tgt_ptr);
+    }
+
+    #[test]
+    fn test_get_leaf_idx_none_returns_correct_index() {
+        let mut bt = BinaryTree::from(4u32);
+        // Move to leaf index 3 explicitly
+        let leaf = bt.leaves_[3].clone();
+        bt.move_to(leaf);
+        let idx = bt.get_leaf_idx(None);
+        assert_eq!(idx, 3);
+    }
+
+    #[test]
+    fn test_get_leaf_idx_traversal_with_random_r() {
+        let mut bt = BinaryTree::from(4u32);
+        // Assign weights: leaf0=1, leaf1=2, leaf2=3, leaf3=4 (total=10)
+        for (i, w) in [1.0, 2.0, 3.0, 4.0].iter().enumerate() {
+            bt.update_value(*w, Some(i));
+        }
+        // Helper closure to test traversal
+        let mut check = |r: f64, expected_leaf: usize| {
+            bt.reset_cur_node();
+            let _ignored = bt.get_leaf_idx(Some(r)); // return value currently unused (always 0)
+            // After traversal, cur_node_ is at the leaf; get actual index via None path
+            let leaf_idx = bt.get_leaf_idx(None);
+            assert_eq!(leaf_idx, expected_leaf, "r={} expected leaf {}", r, expected_leaf);
+        };
+        // cumulative probs: [0.1, 0.3, 0.6, 1.0]
+        check(0.05, 0);
+        check(0.25, 1);
+        check(0.45, 2);
+        check(0.95, 3);
+    }
+
+    #[test]
+    fn test_move_up_chain_to_root() {
+        let mut bt = BinaryTree::from(4u32);
+        bt.move_down_right();
+        bt.move_down_left(); // navigate two levels
+        assert!(!bt.is_root());
+        bt.move_up();
+        assert!(!bt.is_root());
+        bt.move_up();
+        assert!(bt.is_root());
     }
 }
