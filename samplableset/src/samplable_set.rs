@@ -450,3 +450,119 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // use rand::SeedableRng;
+    // use rand_pcg::Pcg32 as RNGType;
+
+    fn approx_eq(a: f64, b: f64, eps: f64) -> bool { (a - b).abs() <= eps }
+
+    #[test]
+    fn insert_erase_and_totals() {
+        let mut s = SamplableSet::<i32>::new(1.0, 8.0);
+        // set fixed internal RNG for this test
+        s.rng_ = RNGType::seed_from_u64(42);
+
+        let a = 1;
+        let b = 2;
+        let c = 3;
+
+        s.insert(&a, 1.0);
+        s.insert(&b, 2.0);
+        s.insert(&c, 5.0);
+
+        assert_eq!(s.size(), 3);
+        assert!(s.exists(&b));
+        assert!(approx_eq(s.total_weight(), 8.0, 1e-12));
+
+        s.erase(&b);
+        assert_eq!(s.size(), 2);
+        assert!(!s.exists(&b));
+        assert!(approx_eq(s.total_weight(), 6.0, 1e-12));
+    }
+
+    #[test]
+    fn get_weight_and_exists() {
+        let mut s = SamplableSet::<&'static str>::new(1.0, 8.0);
+        s.rng_ = RNGType::seed_from_u64(7);
+
+        s.insert(&"apple", 3.0);
+        s.insert(&"banana", 5.0);
+        assert!(s.exists(&"apple"));
+        assert_eq!(s.get_weight(&"apple"), 3.0);
+        assert_eq!(s.get_weight(&"banana"), 5.0);
+    }
+
+    #[test]
+    fn iterator_walks_all_pairs() {
+        let mut s = SamplableSet::<i32>::new(1.0, 8.0);
+        s.insert(&10, 2.0);
+        s.insert(&11, 3.0);
+        s.insert(&12, 1.0);
+
+        let items: Vec<(i32, f64)> = (&s).into_iter().map(|(k, w)| (*k, w)).collect();
+        assert_eq!(items.len(), s.size());
+        assert!(items.iter().any(|(k, _)| *k == 10));
+        assert!(items.iter().any(|(k, _)| *k == 11));
+        assert!(items.iter().any(|(k, _)| *k == 12));
+    }
+
+    #[test]
+    fn sampling_distribution_matches_weights_basic() {
+        // weights 1:2:5 -> probabilities 1/8, 2/8, 5/8
+        let mut s = SamplableSet::<usize>::new(1.0, 8.0);
+        s.rng_ = RNGType::seed_from_u64(123);
+        s.insert(&0, 1.0);
+        s.insert(&1, 2.0);
+        s.insert(&2, 5.0);
+
+        let n = 100_000usize;
+        let mut counts = [0usize; 3];
+        for _ in 0..n {
+            let (k, _) = s.sample().expect("non-empty");
+            counts[k] += 1;
+        }
+
+        let p = [1.0/8.0, 2.0/8.0, 5.0/8.0];
+        for i in 0..3 {
+            let freq = counts[i] as f64 / n as f64;
+            let sigma = (p[i] * (1.0 - p[i]) / n as f64).sqrt();
+            assert!(
+                (freq - p[i]).abs() <= 5.0 * sigma,
+                // \u{03C3} = sigma
+                "bucket {i}: freq={freq:.6}, expected={:.6}, 5\u{03C3}={:.6}",
+                p[i], 5.0 * sigma
+            );
+        }
+    }
+
+    #[test]
+    fn clear_zeros_but_keeps_groups() {
+        let mut s = SamplableSet::<i32>::new(1.0, 8.0);
+        s.insert(&1, 1.0);
+        s.insert(&2, 2.0);
+        assert!(s.total_weight() > 0.0);
+
+        let group_count = s.propensity_group_vec_.len();
+        s.clear();
+
+        assert_eq!(s.size(), 0);
+        assert!(approx_eq(s.total_weight(), 0.0, 1e-12));
+        assert_eq!(s.propensity_group_vec_.len(), group_count);
+        assert!(s.propensity_group_vec_.iter().all(|g| g.is_empty()));
+    }
+
+    #[test]
+    fn sampling_iterator_yields_n_items() {
+        let mut s = SamplableSet::<i32>::new(1.0, 8.0);
+        s.rng_ = RNGType::seed_from_u64(9);
+        s.insert(&1, 3.0);
+        s.insert(&2, 5.0);
+
+        let n = 1000;
+        let v: Vec<_> = s.into_sampling_iter(n).collect();
+        assert_eq!(v.len(), n);
+    }
+}
