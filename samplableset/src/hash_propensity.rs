@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HashPropensity {
     propensity_min_: f64,
     propensity_max_: f64,
@@ -30,10 +30,14 @@ pub struct HashPropensity {
 
 impl HashPropensity {
     pub fn new(propensity_min: f64, propensity_max: f64) -> Self {
-        assert!(propensity_max.is_finite() && propensity_min > 0.0, 
-            "Propensity min must be positive and less than infinity");
-        assert!(propensity_max.is_finite() && propensity_max > propensity_min,
-            "Propensity max must be finite and greater than min"); // TODO does it HAVE to be greater than min?
+        assert!(
+            propensity_max.is_finite() && propensity_min > 0.0,
+            "Propensity min must be positive and less than infinity"
+        );
+        assert!(
+            propensity_max.is_finite() && propensity_max > propensity_min,
+            "Propensity max must be finite and greater than min"
+        ); // TODO does it HAVE to be greater than min?
 
         let is_pow_two = is_pow_two_f64(propensity_max / propensity_min);
         // f64::floor(f64::log2(
@@ -42,24 +46,22 @@ impl HashPropensity {
         //     propensity_max / propensity_min
         // ));
 
-        HashPropensity { 
-            propensity_min_: propensity_min, 
-            propensity_max_: propensity_max, 
-            power_of_two_: is_pow_two 
+        HashPropensity {
+            propensity_min_: propensity_min,
+            propensity_max_: propensity_max,
+            power_of_two_: is_pow_two,
         }
     }
 
     #[inline]
     pub fn operator(&self, propensity: f64) -> usize {
         // TODO handle case where propensity < self.propensity_min_
-        let mut idx: usize = f64::floor(f64::log2(
-            propensity / self.propensity_min_
-        )) as usize;
+        let mut idx: usize = f64::floor(f64::log2(propensity / self.propensity_min_)) as usize;
 
         // TODO test if epsilon needed
         if self.power_of_two_ && propensity == self.propensity_max_ {
             idx -= 1;
-        }       
+        }
         idx
     }
 }
@@ -112,7 +114,7 @@ mod tests {
         assert_eq!(hp.propensity_min_, 1.0);
         assert_eq!(hp.propensity_max_, 8.0);
         assert!(hp.power_of_two_);
-    }    
+    }
 
     #[test]
     fn test_operator_basic() {
@@ -122,6 +124,7 @@ mod tests {
         assert_eq!(hp.operator(4.0), 2);
         // propensity == max, power_of_two_ == true, so idx -= 1
         assert_eq!(hp.operator(8.0), 2);
+        assert_eq!(hp.operator(3193.0), 11);
     }
 
     #[test]
@@ -133,5 +136,3 @@ mod tests {
         assert_eq!(idx, f64::floor(f64::log2(5.0 / 1.0)) as usize);
     }
 }
-
-
