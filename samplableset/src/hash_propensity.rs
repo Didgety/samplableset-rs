@@ -27,27 +27,25 @@ pub(crate) struct HashPropensity {
     propensity_min_: f64,
     propensity_max_: f64,
     power_of_two_: bool,
-    // scale: f64 // precompute 1/(max-min) ?
 }
 
 impl HashPropensity {
     #[doc(hidden)]
     /// Creates a new `HashPropensity`.
     /// 
-    /// # Panics
-    ///
-    /// Panics if `propensity_min` is not positive, 
-    /// `propensity_max` is not finite, or if 
-    /// `propensity_max` is less than or equal to `propensity_min`.
-    pub fn new(propensity_min: f64, propensity_max: f64) -> Self {
-        assert!(
-            propensity_max.is_finite() && propensity_min > 0.0,
+    /// Valid conditions for creating a new HashPropensity are enforced by SamplableSet
+    /// 
+    /// - `propensity_min` must be positive and less than infinity
+    /// - `propensity_max` must be finite and greater than `propensity_min`
+    pub(crate) fn new(propensity_min: f64, propensity_max: f64) -> Self {
+        debug_assert!(
+            propensity_min.is_finite() && propensity_min > 0.0,
             "Propensity min must be positive and less than infinity"
         );
-        assert!(
+        debug_assert!(
             propensity_max.is_finite() && propensity_max > propensity_min,
             "Propensity max must be finite and greater than min"
-        ); // TODO does it HAVE to be greater than min?
+        );
 
         let is_pow_two = is_pow_two_f64(propensity_max / propensity_min);        
 
@@ -60,9 +58,22 @@ impl HashPropensity {
 
     #[doc(hidden)]
     /// Returns the index of the given propensity.
+    /// 
+    /// Valid conditions for using this function are enforced by SamplableSet
+    ///
+    /// - `propensity` must be finite and greater than zero
+    /// - `propensity` must be within the range of `propensity_min_` and `propensity_max_`
     #[inline]
-    pub fn operator(&self, propensity: f64) -> usize {
-        // TODO handle case where propensity < self.propensity_min_
+    pub(crate) fn operator(&self, propensity: f64) -> usize {
+        debug_assert!(
+            propensity.is_finite() && propensity > 0.0,
+            "Propensity must be finite and greater than zero"
+        );
+        debug_assert!(
+            propensity >= self.propensity_min_ && propensity <= self.propensity_max_,
+            "Propensity must be within the range of propensity_min_ and propensity_max_"
+        );
+
         let mut idx: usize = f64::floor(f64::log2(propensity / self.propensity_min_)) as usize;
 
         // TODO test if epsilon needed
@@ -75,7 +86,7 @@ impl HashPropensity {
 
 #[doc(hidden)]
 /// Checks if a number is a power of two.
-/// Only works for positive numbers
+/// Only works for positive numbers, enforced by SamplableSet
 ///
 /// ```rust,ignore
 /// // IEEE-754: a power of two has zero mantissa bits.
@@ -146,7 +157,6 @@ mod tests {
         assert_eq!(hp.operator(4.0), 2);
         // propensity == max, power_of_two_ == true, so idx -= 1
         assert_eq!(hp.operator(8.0), 2);
-        assert_eq!(hp.operator(3193.0), 11);
     }
 
     #[test]
