@@ -45,24 +45,97 @@ thread_local! {
     static GEN: RefCell<RNGType> = RefCell::new(RNGType::from_seed(rand::random()));
 }
 
-/// Private helper function
+/// Private helper function for static GEN
 /// If any instance of SamplableSet calls this,
 /// RNG will be updated for **all** instances
 #[allow(dead_code)]
-fn seed(seed: u64) {
+fn seed_static_gen(seed: u64) {
     GEN.with(|g|
     *g.borrow_mut() = RNGType::seed_from_u64(seed)
     );
 }
 
+/// Errors that can occur within the sampling set.
 #[derive(Debug)]
 pub enum SSetError {
-    KeyNotFound,
+    /// The set is empty.
     EmptySet,
-    WeightOutOfRange { w: f64, min: f64, max: f64 },
+    /// Internal state is broken and invalid operations occurred or may occur
     InconsistentState(&'static str),
+    /// Key not found in the set.
+    KeyNotFound,  
+    /// Weight is not within the bounds $$[w_{\min}, w_{\max}]$$
+    WeightOutOfRange { w: f64, min: f64, max: f64 },
 }
 
+/// A weighted set that supports fast sampling *with replacement*
+/// with probability proportional to item weights.
+///
+/// This implements the composition–rejection sampler of
+/// St-Onge et al., *Comput. Phys. Commun.* 240 (2019) 30-37
+/// (DOI: [10.1016/j.cpc.2019.02.008](https://doi.org/10.1016/j.cpc.2019.02.008)), 
+/// specialized with **dyadic (power-of-two) propensity groups**.
+///
+/// # Model
+/// Store pairs $(x_i, w_i)$ with $w_{\min} \le w_i \le w_{\max}$.
+/// Items are partitioned by weight scale into groups $G_k$ via `HashPropensity`,
+/// approximately:
+///
+/// - $G_k = \[i \mid 2^k \cdot w_{\min} \le w_i < 2^{k+1} \cdot w_{\min} \]$ for $k = 0,\dots,G-2$,
+/// - $G_{G-1}$ covers the top range up to $w_{\max}$.
+///
+/// For each group $k$, the set maintains:
+/// - $S_k = \sum_{i \in G_k} w_i$ — the group’s total, stored in a cumulative
+///   binary tree over groups.
+/// - $m_k$ — an upper bound on any $w_i$ in $G_k$ (about $2^{k+1} w_{\min}$,
+///   while the last group uses $w_{\max}$).
+///
+/// # Sampling (composition–rejection)
+/// 1. **Composition:** choose a group $g$ with probability
+///    $P(g) = \dfrac{S_g}{S}$, where $S = \sum_k S_k$, by walking the
+///    cumulative tree (logarithmic in the number of groups).
+/// 2. **Rejection:** pick an index uniformly within $G_g$ and accept it with
+///    probability $\dfrac{w_j}{m_g}$; otherwise retry in the same group.
+///    Dyadic grouping keeps $w_j$ close to $m_g$, so the acceptance probability
+///    is bounded away from zero (in the ideal dyadic case, $\ge \tfrac{1}{2}$),
+///    yielding $\mathcal{O}(1)$ expected retries.
+///
+/// # Complexity
+/// Let $W = \dfrac{w_{\max}}{w_{\min}}$ and $G = \lceil \log_2 W \rceil + 1$.
+/// - **Sampling:** $\mathcal{O}(\log G) = \mathcal{O}(\log\log W)$ for group selection
+///   $+$ $\mathcal{O}(1)$ expected for the rejection step.
+/// - **Insert / Erase / set\_weight:** update one group’s total in the tree
+///   in $\mathcal{O}(\log G)$ and mutate one bucket in $\mathcal{O}(1)$.
+/// If $W$ is bounded, these are effectively $\mathcal{O}(1)$ on average.
+///
+/// # Edge cases & invariants
+/// - When $W \le 2$, there is a **single group** ($G = 1$): the tree has one leaf,
+///   and sampling reduces to uniform choice within that group followed by acceptance.
+/// - The upper boundary (exact power-of-two span) is handled so the maximum weight
+///   does not hash past the last group.
+/// - Public methods preserve internal invariants; internal helpers assume them.
+///
+/// # Examples
+/// ```
+/// use samplableset_rs::SamplableSet;
+/// 
+/// let mut s = SamplableSet::<u64>::new(1.0, 8.0).unwrap();
+/// s.insert(&1, 3.0).unwrap();
+/// s.insert(&2, 5.0).unwrap();
+///
+/// // Draw one sample (with replacement)
+/// let draw = s.sample();
+/// assert!(draw.is_ok());
+///
+/// // Deterministic iteration over stored items
+/// for (k, w) in &s {
+///     // use k, w
+/// }
+/// 
+/// // Create a sampling iterator and collect the samples
+/// let iter = s.into_sampling_iter(10000);
+/// let samples: Vec<_> = iter.collect();
+/// ```
 #[derive(Debug, Clone)]
 pub struct SamplableSet<T>
 where
@@ -90,7 +163,7 @@ impl<T> SamplableSet<T>
 where
     T: Clone + Eq + Hash,
 {
-    /// Creates a new, empty `SamplableSet`.
+    /// Creates a new, empty [SamplableSet].
     pub fn new(min_weight: f64, max_weight: f64) -> SSetResult<Self> {
         assert!(min_weight > 0.0 && max_weight.is_finite() && max_weight > min_weight);
 
@@ -139,7 +212,21 @@ where
         self.pos_map_.contains_key(element)
     }
 
-    /// Samples an item from the set using the built-in random number generator.
+    /// Draw one `(element, weight)` proportional to weight (with replacement).
+    ///
+    /// Uses the set’s **internal RNG** and the composition–rejection scheme
+    /// described in the type-level docs.
+    ///
+    /// **Complexity:** $\mathcal{O}(\log\log W)$ expected, where
+    /// $W = \dfrac{w_{\max}}{w_{\min}}$.
+    ///
+    /// For deterministic external RNG, use [SamplableSet::sample_ext_rng] instead.
+    /// 
+    /// ------
+    /// 
+    /// Returns `Ok((element, weight))` on success.
+    ///
+    /// Returns [SSetError::EmptySet] if the set is empty.
     pub fn sample(&mut self) -> SSetResult<(T, f64)> {
         // TODO this is the only validity check in the original implementation
         // should the others be changed to debug_assert!() ?
@@ -153,8 +240,8 @@ where
             return Err(SSetError::InconsistentState("Invalid total weight"));
         }
 
-        let r_grp: f64 = self.rng_.random_range(0.0..1.0);
-        let grp_idx: GroupIndex = self.sampling_tree_.get_leaf_idx(Some(r_grp));
+        let r: f64 = self.rng_.random_range(0.0..1.0);
+        let grp_idx: GroupIndex = self.sampling_tree_.get_leaf_idx(Some(r));
 
         // In valid structure, groups indexed by leaves are non-empty
         let grp = &self.propensity_group_vec_[grp_idx];
@@ -182,7 +269,19 @@ where
         }
     }
 
-    /// Samples an item from the set using the provided external random number generator.
+    /// Draw one `(element, weight)` using a **caller-supplied RNG**.
+    ///
+    /// Algorithm and guarantees are identical to [SamplableSet::sample], but the random draws
+    /// come from `generator`. 
+    ///
+    /// **Complexity:** $\mathcal{O}(\log\log W)$ expected, where
+    /// $W = \dfrac{w_{\max}}{w_{\min}}$.
+    /// 
+    /// ------
+    /// 
+    /// Returns `Ok((element, weight))` on success.
+    /// 
+    /// Returns [SSetError::EmptySet] if the set is empty.
     pub fn sample_ext_rng<R>(&mut self, generator: &mut R) -> SSetResult<(T, f64)>
     where
         R: Rng + ?Sized,
@@ -197,8 +296,8 @@ where
             return Err(SSetError::InconsistentState("Invalid total weight"));
         }
 
-        let r_grp: f64 = generator.random_range(0.0..1.0);
-        let grp_idx: GroupIndex = self.sampling_tree_.get_leaf_idx(Some(r_grp));
+        let r: f64 = generator.random_range(0.0..1.0);
+        let grp_idx: GroupIndex = self.sampling_tree_.get_leaf_idx(Some(r));
 
         let grp = &self.propensity_group_vec_[grp_idx];
         let grp_len = grp.len();
@@ -225,13 +324,15 @@ where
 
     /// Returns the total weight of the set.
     /// 
-    /// The requirement that `cur_node_` be the root
-    /// is met by the implementation of the BinaryTree.
+    // The requirement that `cur_node_` be the root
+    // is met by the implementation of the BinaryTree.
     pub fn total_weight(&self) -> f64 {
         self.sampling_tree_.get_val()
     }
 
     /// Returns the weight of the given element, if it exists.
+    /// 
+    /// Returns [SSetError::KeyNotFound] if the element is not found.
     pub fn get_weight(&self, element: &T) -> SSetResult<f64> {
         let &(g, i) = self
             .pos_map_
@@ -242,8 +343,10 @@ where
 
     /// Inserts an element into the set with the given weight.
     /// 
-    /// True on success.
-    /// False on duplicate key.
+    /// Returns `true` on success, 
+    /// `false` on duplicate key.
+    /// 
+    /// Returns [SSetError::WeightOutOfRange] if the weight is invalid.
     pub fn insert(&mut self, element: &T, weight: f64) -> SSetResult<bool> {
         match self.weight_check(weight) {
             Ok(()) => (),
@@ -271,7 +374,7 @@ where
     /// Sets the weight of a node.
     /// If the node does not exist, functionally the same as insert.
     /// 
-    /// Returns SSetError::WeightOutOfRange if the weight is invalid.
+    /// Returns [SSetError::WeightOutOfRange] if the weight is invalid.
     pub fn set_weight(&mut self, element: &T, weight: f64) -> SSetResult<()> {
         match self.weight_check(weight) {
             Ok(()) => {
@@ -292,8 +395,8 @@ where
 
     /// Erases an element from the set, if it exists.
     /// 
-    /// True on element removed.
-    /// False if element was not found.
+    /// Returns `true` on element removed, 
+    /// `false` if element was not found.
     pub fn erase(&mut self, element: &T) -> bool {
         let (grp_idx, in_grp_idx) = match self.pos_map_.get(element) {
             Some(&pos) => pos,
@@ -347,6 +450,8 @@ where
         }
     }
 
+    // TODO expose publicly?
+    #[allow(dead_code)]
     fn seed(&mut self, seed: u64) {
         self.rng_ = RNGType::seed_from_u64(seed);
     }
@@ -357,6 +462,7 @@ where
     T: Clone + Eq + Hash,
 {
     type Item = (&'a T, f64);
+    /// The type of the iterator returned by `into_iter`.
     type IntoIter = SeqSamplableIter<'a, T>;
 
     /// Returns a sequential iterator over the items in the set.
@@ -449,6 +555,7 @@ where
 }
 
 /// A sampling iterator over the items in the set.
+/// 
 /// This iterator will yield a fixed number of samples from the set.
 pub struct SamplingIter<'a, T>
 where
