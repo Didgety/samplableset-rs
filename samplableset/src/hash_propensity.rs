@@ -88,7 +88,7 @@ impl HashPropensity {
 /// Checks if a number is a power of two.
 /// Only works for positive numbers, enforced by SamplableSet
 ///
-/// ```rust,ignore
+/// ```ignore
 /// // IEEE-754: a power of two has zero mantissa bits.
 /// bits = x.to_bits();
 /// exp = (bits >> 52) & 0x7FF;
@@ -97,7 +97,7 @@ impl HashPropensity {
 /// ```
 /// 
 /// Equivalent to
-/// ```rust,ignore
+/// ```ignore
 /// f64::floor(f64::log2(
 ///     propensity_max / propensity_min
 /// )) == f64::ceil(f64::log2(
