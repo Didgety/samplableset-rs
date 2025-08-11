@@ -56,3 +56,4 @@ bucket ops
 [dependencies]
 samplable-set = { git = "https://github.com/<you>/samplable-set-rs" }
 ```
+Where `<you>` is either your fork or the main repository 
