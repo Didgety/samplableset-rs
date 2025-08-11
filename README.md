@@ -1,7 +1,7 @@
 # SamplableSet (Rust)
 
 Fast weighted sampling **with replacement** using a composition–rejection scheme and **dyadic (power-of-two) grouping**. This crate is a Rust re-implementation and extension of the approach introduced by my professors
-Guillaume St-Onge, Laurent Hébert-Dufresne, their collaborators, and the original
+Guillaume St-Onge & Laurent Hébert-Dufresne, their collaborators, and the original
 C++ project **[SamplableSet](https://github.com/gstonge/SamplableSet)**.
 
 > **Paper**  
