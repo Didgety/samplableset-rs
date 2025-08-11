@@ -16,17 +16,19 @@ C++ project **[SamplableSet](https://github.com/gstonge/SamplableSet)**.
 
 ## Why this structure
 
-Let $ W = \dfrac{w_{\max}}{w_{\min}} $ be the weight range. Items are binned into  
-$ G = \lceil \log_2 W \rceil + 1 $ **propensity groups** by scale. A cumulative **binary tree over
-groups** enables group selection in $ \mathcal{O}(\log G) = \mathcal{O}(\log\log W) $ time, and
-an in-group acceptance–rejection step succeeds in $ \mathcal{O}(1) $ expected time.
+Let $W = \dfrac{w_{\max}}{w_{\min}}$ be the weight range. Items are binned into  
+$G = \lceil \log_2 W \rceil + 1$ **propensity groups** by scale. A cumulative **binary tree over
+groups** enables group selection in $\mathcal{O}(\log G) = \mathcal{O}(\log\log W)$ time, and
+an in-group acceptance–rejection step succeeds in 
+$\mathcal{O}(1)$ expected time.
 
-If $ W $ is bounded in your application, operations are effectively **$ \mathcal{O}(1) $** on average.
+If $W$ is bounded in your application, operations are effectively **$\mathcal{O}(1)$** on average.
 
 **Average-case complexity**
 
-- **`sample`**: $ \mathcal{O}(\log\log W) + \mathcal{O}(1) $ expected  
-- **`insert` / `erase` / `set_weight`**: $ \mathcal{O}(\log\log W) $ (update one group total) + $ \mathcal{O}(1) $ bucket ops
+- **`sample`**: $\mathcal{O}(\log\log W) + \mathcal{O}(1)$ expected  
+- **`insert` / `erase` / `set_weight`**: $\mathcal{O}(\log\log W)$ (update one group total) + $\mathcal{O}(1)$
+bucket ops
 
 ---
 
