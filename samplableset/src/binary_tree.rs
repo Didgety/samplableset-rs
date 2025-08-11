@@ -394,11 +394,6 @@ impl BinaryTree {
             None
         }
     }
-
-    // TODO needed for C or python interop?
-    fn destroy_tree(_node: NodeRef) {
-        unimplemented!()
-    }
 }
 
 // TODO expand to u64+?
