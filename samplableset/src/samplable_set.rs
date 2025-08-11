@@ -69,7 +69,6 @@ where
     min_weight_: f64,
     max_weight_: f64,
 
-    // random_01_: Uniform<f64>,
     // Cloning results in identical behavior
     // because the state of RNG is preserved
     // when using #[derive(Clone)]
@@ -113,7 +112,6 @@ where
         SamplableSet {
             min_weight_: min_weight,
             max_weight_: max_weight,
-            // random_01_: Uniform::new(0.0, 1.0).unwrap(),
             rng_: RNGType::from_os_rng(),
             hash_: hash,
             max_propensity_vec_: max_propensity_vec,
@@ -196,7 +194,7 @@ where
             return None;
         }
 
-        let r_grp: f64 = generator.random_range(0.0..=1.0);
+        let r_grp: f64 = generator.random_range(0.0..1.0);
         let grp_idx: GroupIndex = self.sampling_tree_.get_leaf_idx(Some(r_grp));
 
         let grp = &self.propensity_group_vec_[grp_idx];
@@ -207,7 +205,7 @@ where
 
         let m_k = self.max_propensity_vec_[grp_idx];
         loop {
-            let u: f64 = generator.random_range(0.0..=grp_len as f64);
+            let u: f64 = generator.random_range(0.0..grp_len as f64);
             let in_grp_idx: InGroupIndex = (u * grp_len as f64).floor() as InGroupIndex;
 
             let (elem, weight) = {
@@ -222,10 +220,12 @@ where
         }
     }
 
-    // TODO this requires a guarantee that cur_node is always root_
     /// Returns the total weight of the set.
+    /// 
+    /// The requirement that `cur_node_` be the root
+    /// is met by the implementation of the BinaryTree.
     pub fn total_weight(&self) -> f64 {
-        self.sampling_tree_.get_val().unwrap()
+        self.sampling_tree_.get_val()
     }
 
     // TODO add errors instead of panics
@@ -596,4 +596,89 @@ mod tests {
         let v: Vec<_> = s.into_sampling_iter(n).collect();
         assert_eq!(v.len(), n);
     }
+
+    #[test]
+    fn single_group_sampling_is_safe() {
+        let mut s = SamplableSet::<u64>::new(1.0, 1.5); // R < 2 -> 1 group
+        s.rng_ = RNGType::seed_from_u64(123);
+
+        s.insert(&10, 1.0);
+        s.insert(&20, 1.2);
+        s.insert(&30, 1.4);
+
+        for _ in 0..50_000 {
+            let got = s.sample();
+            assert!(got.is_some(), "sample returned None on non-empty set");
+        }
+    }
+
+    #[test]
+    fn power_of_two_span_is_safe() {
+        let mut s = SamplableSet::<u64>::new(1.0, 8.0); // ratio = 8 (power of two)
+        s.rng_ = RNGType::seed_from_u64(7);
+
+        // put something in each group (your insert hashes by weight)
+        s.insert(&1, 1.0);
+        s.insert(&2, 2.0);
+        s.insert(&3, 3.5);
+        s.insert(&4, 7.9);
+
+        for _ in 0..50_000 {
+            assert!(s.sample().is_some());
+        }
+    }
+
+    #[test]
+    fn clear_then_resample_is_safe() {
+        let mut s = SamplableSet::<u64>::new(1.0, 8.0);
+        s.rng_ = RNGType::seed_from_u64(42);
+        s.insert(&1, 3.0);
+        s.insert(&2, 5.0);
+
+        s.clear();
+        assert!(s.empty());
+
+        // Refill and sample heavily
+        s.insert(&10, 1.0);
+        s.insert(&11, 2.0);
+        s.insert(&12, 5.0);
+        for _ in 0..20_000 {
+            assert!(s.sample().is_some());
+        }
+    }
+
+    #[test]
+    fn mutate_and_sample_fuzz_is_safe() {
+        let mut s = SamplableSet::<u64>::new(0.5, 10.0);
+        s.rng_ = rand_pcg::Pcg32::seed_from_u64(999);
+
+        for k in 0..50 {
+            s.insert(&k, 0.5 + ((k as f64) % 10.0));
+        }
+
+        // 64-bit LCG: x_{n+1} = a*x_n + c (mod 2^64)
+        let mut r: u64 = 1;
+        const A: u64 = 6364136223846793005;
+        const C: u64 = 1;
+
+        for _ in 0..10_000 {
+            r = r.wrapping_mul(A).wrapping_add(C);
+
+            let which = (r % 3) as u8;
+            let key: u64 = (r >> 32) % 60; // use high bits for variety
+
+            match which {
+                0 => s.erase(&key),
+                1 => s.set_weight(&key, 0.5 + ((key as f64) % 10.0)),
+                _ => s.insert(&key, 0.5 + ((key as f64) % 10.0)),
+            }
+
+            if !s.empty() {
+                assert!(s.sample().is_some());
+            } else {
+                assert!(s.sample().is_none());
+            }
+        }
+    }
+
 }
