@@ -48,11 +48,12 @@ thread_local! {
 /// Private helper function
 /// If any instance of SamplableSet calls this,
 /// RNG will be updated for **all** instances
-// fn seed(seed: u64) {
-//     GEN.with(|g|
-//     *g.borrow_mut() = RNGType::seed_from_u64(seed)
-//     );
-// }
+#[allow(dead_code)]
+fn seed(seed: u64) {
+    GEN.with(|g|
+    *g.borrow_mut() = RNGType::seed_from_u64(seed)
+    );
+}
 
 #[derive(Debug)]
 pub enum SSetError {
@@ -90,7 +91,7 @@ where
     T: Clone + Eq + Hash,
 {
     /// Creates a new, empty `SamplableSet`.
-    pub fn new(min_weight: f64, max_weight: f64) -> Result<Self, SSetError> {
+    pub fn new(min_weight: f64, max_weight: f64) -> SSetResult<Self> {
         assert!(min_weight > 0.0 && max_weight.is_finite() && max_weight > min_weight);
 
         let hash = HashPropensity::new(min_weight, max_weight);
@@ -139,7 +140,7 @@ where
     }
 
     /// Samples an item from the set using the built-in random number generator.
-    pub fn sample(&mut self) -> Result<(T, f64), SSetError> {
+    pub fn sample(&mut self) -> SSetResult<(T, f64)> {
         // TODO this is the only validity check in the original implementation
         // should the others be changed to debug_assert!() ?
         if self.empty() {
@@ -182,7 +183,7 @@ where
     }
 
     /// Samples an item from the set using the provided external random number generator.
-    pub fn sample_ext_rng<R>(&mut self, generator: &mut R) -> Result<(T, f64), SSetError>
+    pub fn sample_ext_rng<R>(&mut self, generator: &mut R) -> SSetResult<(T, f64)>
     where
         R: Rng + ?Sized,
     {
@@ -231,7 +232,7 @@ where
     }
 
     /// Returns the weight of the given element, if it exists.
-    pub fn get_weight(&self, element: &T) -> Result<f64, SSetError> {
+    pub fn get_weight(&self, element: &T) -> SSetResult<f64> {
         let &(g, i) = self
             .pos_map_
             .get(element)
@@ -241,9 +242,9 @@ where
 
     /// Inserts an element into the set with the given weight.
     /// 
-    /// True on success
-    /// False on duplicate key
-    pub fn insert(&mut self, element: &T, weight: f64) -> Result<bool, SSetError> {
+    /// True on success.
+    /// False on duplicate key.
+    pub fn insert(&mut self, element: &T, weight: f64) -> SSetResult<bool> {
         match self.weight_check(weight) {
             Ok(()) => (),
             Err(e) => return Err(e),
@@ -269,7 +270,9 @@ where
     // and mutate in place
     /// Sets the weight of a node.
     /// If the node does not exist, functionally the same as insert.
-    pub fn set_weight(&mut self, element: &T, weight: f64) -> Result<(), SSetError> {
+    /// 
+    /// Returns SSetError::WeightOutOfRange if the weight is invalid.
+    pub fn set_weight(&mut self, element: &T, weight: f64) -> SSetResult<()> {
         match self.weight_check(weight) {
             Ok(()) => {
                 let _ = self.erase(element);
@@ -288,6 +291,9 @@ where
     }
 
     /// Erases an element from the set, if it exists.
+    /// 
+    /// True on element removed.
+    /// False if element was not found.
     pub fn erase(&mut self, element: &T) -> bool {
         let (grp_idx, in_grp_idx) = match self.pos_map_.get(element) {
             Some(&pos) => pos,
@@ -327,9 +333,10 @@ where
 
     #[doc(hidden)]
     /// Checks that the weight is within the allowed bounds.
-    fn weight_check(&self, weight: f64) -> Result<(), SSetError> {
+    /// 
+    /// Returns SSetError::WeightOutOfRange if the weight is invalid.
+    fn weight_check(&self, weight: f64) -> SSetResult<()> {
         if weight < self.min_weight_ || weight > self.max_weight_ {
-            // TODO replace with error
             Err(SSetError::WeightOutOfRange {
                 w: weight,
                 min: self.min_weight_,
@@ -352,7 +359,7 @@ where
     type Item = (&'a T, f64);
     type IntoIter = SeqSamplableIter<'a, T>;
 
-    /// Returns an iterator over the items in the set
+    /// Returns a sequential iterator over the items in the set.
     fn into_iter(self) -> Self::IntoIter {
         let mut it = SeqSamplableIter {
             groups: &self.propensity_group_vec_,
@@ -373,7 +380,7 @@ where
     T: Clone + Eq + Hash,
 {
     /// Returns an iterator that lazily samples `n` items from the set
-    /// using the built in random number generator
+    /// using the built in random number generator.
     pub fn into_sampling_iter<'a>(&'a mut self, n: usize) -> SamplingIter<'a, T> {
         SamplingIter {
             set: self,
@@ -382,7 +389,7 @@ where
     }
 
     /// Returns an iterator that lazily samples `n` items from the set
-    /// given an external random number generator
+    /// given an external random number generator.
     pub fn into_ext_sampling_iter<'a, R>(
         &'a mut self,
         generator: &'a mut R,
@@ -399,6 +406,7 @@ where
     }
 }
 
+/// A sequential iterator over the items in the set
 pub struct SeqSamplableIter<'a, T>
 where
     T: Clone + Eq + Hash + 'a,
@@ -440,6 +448,8 @@ where
     }
 }
 
+/// A sampling iterator over the items in the set.
+/// This iterator will yield a fixed number of samples from the set.
 pub struct SamplingIter<'a, T>
 where
     T: Clone + Eq + Hash,
@@ -466,6 +476,10 @@ where
     }
 }
 
+/// A sampling iterator over the items in the set that
+/// takes an external RNG source.
+/// 
+/// This iterator will yield a fixed number of samples from the set.
 pub struct SamplingIterExt<'a, T, R>
 where
     T: Clone + Eq + Hash,
@@ -481,7 +495,6 @@ where
     T: Clone + Eq + Hash,
     R: Rng + ?Sized + 'a,
 {
-    // type Item = SSetResult<(T, f64)>;
     type Item = (T, f64);
 
     /// Returns the next sampled item from the set,
