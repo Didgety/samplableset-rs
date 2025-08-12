@@ -17,7 +17,7 @@ C++ project **[SamplableSet](https://github.com/gstonge/SamplableSet)**.
 ## Why this structure
 
 Let $W = \dfrac{w_{\max}}{w_{\min}}$ be the weight range. Items are binned into  
-$G = \lceil \log_2 W \rceil + 1$ **propensity groups** by scale. A cumulative **binary tree over
+$G = \lfloor \log_2 W \rfloor + 1$ **propensity groups** by scale. A cumulative **binary tree over
 groups** enables group selection in $\mathcal{O}(\log G) = \mathcal{O}(\log\log W)$ time, and
 an in-group acceptance–rejection step succeeds in 
 $\mathcal{O}(1)$ expected time.

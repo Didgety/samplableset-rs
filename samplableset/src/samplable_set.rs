@@ -101,7 +101,7 @@ pub enum SSetError {
 ///    yielding $\mathcal{O}(1)$ expected retries.
 ///
 /// # Complexity
-/// Let $W = \dfrac{w_{\max}}{w_{\min}}$ and $G = \lceil \log_2 W \rceil + 1$.
+/// Let $W = \dfrac{w_{\max}}{w_{\min}}$ and $G = \lfloor \log_2 W \rfloor + 1$.
 /// - **Sampling:** $\mathcal{O}(\log G) = \mathcal{O}(\log\log W)$ for group selection
 ///   $+$ $\mathcal{O}(1)$ expected for the rejection step.
 /// - **Insert / Erase / set\_weight:** update one group’s total in the tree
