@@ -23,9 +23,13 @@
 use rand::{Rng, SeedableRng};
 use rand_pcg::Pcg32 as RNGType;
 
+#[cfg(feature = "share_rng")]
 use std::cell::RefCell;
+
 use std::collections::HashMap;
+use std::fmt;
 use std::hash::Hash;
+use std::marker::PhantomData;
 
 use crate::binary_tree::BinaryTree;
 use crate::hash_propensity::HashPropensity;
@@ -34,13 +38,14 @@ type GroupIndex = usize;
 type InGroupIndex = usize;
 type SSetPosition = (GroupIndex, InGroupIndex);
 
-type SSetResult<T> = Result<T, SSetError>;
+type SSetResult<T, K> = Result<T, SSetError<K>>;
 
 type PropensityGroup<T> = Vec<(T, f64)>;
 
 // TODO add option for below
 // For consistency with original C++ implementation
 // All instances share the same rng stream (per thread)
+#[cfg(feature = "share_rng")]
 thread_local! {
     static GEN: RefCell<RNGType> = RefCell::new(RNGType::from_seed(rand::random()));
 }
@@ -48,7 +53,7 @@ thread_local! {
 /// Private helper function for static GEN
 /// If any instance of SamplableSet calls this,
 /// RNG will be updated for **all** instances
-#[allow(dead_code)]
+#[cfg(feature = "share_rng")]
 fn seed_static_gen(seed: u64) {
     GEN.with(|g|
     *g.borrow_mut() = RNGType::seed_from_u64(seed)
@@ -57,15 +62,28 @@ fn seed_static_gen(seed: u64) {
 
 /// Errors that can occur within the sampling set.
 #[derive(Debug)]
-pub enum SSetError {
+pub enum SSetError<K> {
     /// The set is empty.
     EmptySet,
     /// Internal state is broken and invalid operations occurred or may occur
     InconsistentState(&'static str),
     /// Key not found in the set.
-    KeyNotFound,  
+    KeyNotFound(K),  
     /// Weight is not within the bounds $$[w_{\min}, w_{\max}]$$
     WeightOutOfRange { w: f64, min: f64, max: f64 },
+}
+
+impl<K: fmt::Debug> fmt::Display for SSetError<K> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SSetError::EmptySet => write!(f, "The set is empty."),
+            SSetError::InconsistentState(msg) => write!(f, "Inconsistent state: {}", msg),
+            SSetError::KeyNotFound(key) => write!(f, "Key not found: {:?}", key),
+            SSetError::WeightOutOfRange { w, min, max } => {
+                write!(f, "Weight {} is out of range [{}, {}]", w, min, max)
+            }
+        }
+    }
 }
 
 /// A weighted set that supports fast sampling *with replacement*
@@ -148,6 +166,7 @@ where
     // because the state of RNG is preserved
     // when using #[derive(Clone)]
     // TODO implement Clone manually and reinitialize the RNG
+    #[cfg(not(feature = "share_rng"))]
     rng_: RNGType,
 
     hash_: HashPropensity,
@@ -159,13 +178,21 @@ where
     propensity_group_vec_: Vec<PropensityGroup<T>>,
 }
 
-impl<T> SamplableSet<T>
+impl<K> SamplableSet<K>
 where
-    T: Clone + Eq + Hash,
+    K: Clone + Eq + Hash,
 {
-    /// Creates a new, empty [SamplableSet].
-    pub fn new(min_weight: f64, max_weight: f64) -> SSetResult<Self> {
-        assert!(min_weight > 0.0 && max_weight.is_finite() && max_weight > min_weight);
+    /// Creates a new, empty [SamplableSet] with 
+    /// $\lceil \log_2 \dfrac{w_{\max}}{w_{\min}} \rceil + 1$ groups.
+    pub fn new(min_weight: f64, max_weight: f64) -> SSetResult<Self, PhantomData<K>> {
+        if min_weight <= 0.0 || !max_weight.is_finite() || max_weight <= min_weight {
+            return Err(SSetError::WeightOutOfRange {
+                w: min_weight,
+                // min weight must be > 0
+                min: 0.01,
+                max: f64::INFINITY,
+            });
+        }
 
         let hash = HashPropensity::new(min_weight, max_weight);
         let num_groups = (hash.operator(max_weight) as u32) + 1;
@@ -182,11 +209,12 @@ where
         }
 
         let sampling_tree = BinaryTree::from(num_groups);
-        let propensity_group_vec = vec![Vec::<(T, f64)>::new(); num_groups as usize];
+        let propensity_group_vec = vec![Vec::<(K, f64)>::new(); num_groups as usize];
 
        Ok(SamplableSet {
             min_weight_: min_weight,
             max_weight_: max_weight,
+            #[cfg(not(feature = "share_rng"))]
             rng_: RNGType::from_os_rng(),
             hash_: hash,
             max_propensity_vec_: max_propensity_vec,
@@ -208,8 +236,119 @@ where
 
     #[inline]
     /// Checks if the element exists in the set.
-    pub fn exists(&self, element: &T) -> bool {
+    pub fn exists(&self, element: &K) -> bool {
         self.pos_map_.contains_key(element)
+    }
+
+    /// Returns the total weight of the set.
+    /// 
+    // The requirement that `cur_node_` be the root
+    // is met by the implementation of the BinaryTree.
+    pub fn total_weight(&self) -> f64 {
+        self.sampling_tree_.get_val()
+    }
+
+    /// Returns the weight of the given element, if it exists.
+    /// 
+    /// You should use [SamplableSet::exists] to check if an element is in the set
+    /// before trying to get its weight.
+    /// 
+    /// Returns [SSetError::KeyNotFound] if the element is not found.
+    pub fn get_weight(&self, element: &K) -> SSetResult<f64, K> {
+        let &(g, i) = self
+            .pos_map_
+            .get(element)
+            .ok_or(SSetError::KeyNotFound(element.clone()))?;
+        Ok(self.propensity_group_vec_[g as usize][i as usize].1)
+    }
+
+    /// Inserts an element into the set with the given weight.
+    /// 
+    /// Returns `true` on success, 
+    /// `false` on duplicate key.
+    /// 
+    /// Returns [SSetError::WeightOutOfRange] if the weight is invalid.
+    pub fn insert(&mut self, element: &K, weight: f64) -> SSetResult<bool, K> {
+        match self.weight_check(weight) {
+            Ok(()) => (),
+            Err(e) => return Err(e),
+        }
+
+        if self.pos_map_.contains_key(element) {
+            return Ok(false);
+        }
+
+        let grp_idx: GroupIndex = self.hash_.operator(weight);
+        let grp = &mut self.propensity_group_vec_[grp_idx];
+        let in_grp_idx: InGroupIndex = grp.len();
+
+        grp.push((element.clone(), weight));
+        self.pos_map_.insert(element.clone(), (grp_idx, in_grp_idx));
+
+        self.sampling_tree_.update_value(weight, Some(grp_idx));
+
+        Ok(true)
+    }
+
+    // TODO add optimization for the case where weight results in no change
+    // and mutate in place
+    /// Sets the weight of a node.
+    /// If the node does not exist, functionally the same as insert.
+    /// 
+    /// Returns [SSetError::WeightOutOfRange] if the weight is invalid.
+    pub fn set_weight(&mut self, element: &K, weight: f64) -> SSetResult<(), K> {
+        match self.weight_check(weight) {
+            Ok(()) => {
+                let _ = self.erase(element);
+                // Weight has already been checked, and we know the 
+                // key does not exist since we just removed it, so 
+                // we can ignore the return type of insert().
+                // However, insert is part of the public API so keeping
+                // the return type is a good idea so that users can know if an 
+                // insertion failed.
+                self.insert(element, weight)?;
+            }
+            Err(e) => return Err(e),
+        }
+
+        Ok(())
+    }
+
+    /// Erases an element from the set, if it exists.
+    /// 
+    /// Returns `true` on element removed, 
+    /// `false` if element was not found.
+    pub fn erase(&mut self, element: &K) -> bool {
+        let (grp_idx, in_grp_idx) = match self.pos_map_.get(element) {
+            Some(&pos) => pos,
+            // Element does not exist
+            None => return false,
+        };
+
+        let grp = &mut self.propensity_group_vec_[grp_idx];
+        let w_old = grp[in_grp_idx].1;
+
+        self.sampling_tree_.update_value(-w_old, Some(grp_idx));
+
+        let last_idx = grp.len() - 1;
+        // TODO return an error if trying to remove last element?
+        if in_grp_idx != last_idx {
+            let moved_key = grp[last_idx].0.clone();
+            grp.swap(in_grp_idx, last_idx);
+            self.pos_map_.insert(moved_key, (grp_idx, in_grp_idx));
+        }
+
+        grp.pop();
+        self.pos_map_.remove(element);
+
+        return true
+    }
+
+    // TODO expose publicly?
+    #[cfg(not(feature = "share_rng"))]
+    #[allow(dead_code)]
+    pub fn seed(&mut self, seed: u64) {
+        self.rng_ = RNGType::seed_from_u64(seed);
     }
 
     /// Draw one `(element, weight)` proportional to weight (with replacement).
@@ -227,7 +366,7 @@ where
     /// Returns `Ok((element, weight))` on success.
     ///
     /// Returns [SSetError::EmptySet] if the set is empty.
-    pub fn sample(&mut self) -> SSetResult<(T, f64)> {
+    pub fn sample(&mut self) -> SSetResult<(K, f64), PhantomData<K>> {
         // TODO this is the only validity check in the original implementation
         // should the others be changed to debug_assert!() ?
         if self.empty() {
@@ -240,28 +379,26 @@ where
             return Err(SSetError::InconsistentState("Invalid total weight"));
         }
 
-        let r: f64 = self.rng_.random_range(0.0..1.0);
+        let r: f64 = self.random_range(0.0..1.0);
         let grp_idx: GroupIndex = self.sampling_tree_.get_leaf_idx(Some(r));
 
         // In valid structure, groups indexed by leaves are non-empty
-        let grp = &self.propensity_group_vec_[grp_idx];
-        let grp_len = grp.len();
+        let m_k = self.max_propensity_vec_[grp_idx];
+        let grp_len = self.propensity_group_vec_[grp_idx].len();
         if grp_len == 0 {
             // If this ever happens, the tree/groups are out of sync.
             return Err(SSetError::InconsistentState("Empty group"));
         }
-
-        let m_k = self.max_propensity_vec_[grp_idx];
         loop {
-            let u: f64 = self.rng_.random_range(0.0..grp_len as f64);
+            let u: f64 = self.random_range(0.0..grp_len as f64);
             let in_grp_idx: InGroupIndex = (u as f64).floor() as InGroupIndex;
 
             let (elem, weight) = {
-                let (e, w) = &grp[in_grp_idx];
+                let (e, w) = &self.propensity_group_vec_[grp_idx][in_grp_idx];
                 (e.clone(), *w)
             };
 
-            let u_acc: f64 = self.rng_.random_range(0.0..1.0);
+            let u_acc: f64 = self.random_range(0.0..1.0);
             if u_acc < (weight / m_k) {
                 return Ok((elem, weight));
             }
@@ -282,7 +419,7 @@ where
     /// Returns `Ok((element, weight))` on success.
     /// 
     /// Returns [SSetError::EmptySet] if the set is empty.
-    pub fn sample_ext_rng<R>(&mut self, generator: &mut R) -> SSetResult<(T, f64)>
+    pub fn sample_ext_rng<R>(&mut self, generator: &mut R) -> SSetResult<(K, f64), PhantomData<K>>
     where
         R: Rng + ?Sized,
     {
@@ -322,107 +459,6 @@ where
         }
     }
 
-    /// Returns the total weight of the set.
-    /// 
-    // The requirement that `cur_node_` be the root
-    // is met by the implementation of the BinaryTree.
-    pub fn total_weight(&self) -> f64 {
-        self.sampling_tree_.get_val()
-    }
-
-    /// Returns the weight of the given element, if it exists.
-    /// 
-    /// Returns [SSetError::KeyNotFound] if the element is not found.
-    pub fn get_weight(&self, element: &T) -> SSetResult<f64> {
-        let &(g, i) = self
-            .pos_map_
-            .get(element)
-            .ok_or(SSetError::KeyNotFound)?;
-        Ok(self.propensity_group_vec_[g as usize][i as usize].1)
-    }
-
-    /// Inserts an element into the set with the given weight.
-    /// 
-    /// Returns `true` on success, 
-    /// `false` on duplicate key.
-    /// 
-    /// Returns [SSetError::WeightOutOfRange] if the weight is invalid.
-    pub fn insert(&mut self, element: &T, weight: f64) -> SSetResult<bool> {
-        match self.weight_check(weight) {
-            Ok(()) => (),
-            Err(e) => return Err(e),
-        }
-
-        if self.pos_map_.contains_key(element) {
-            return Ok(false);
-        }
-
-        let grp_idx: GroupIndex = self.hash_.operator(weight);
-        let grp = &mut self.propensity_group_vec_[grp_idx];
-        let in_grp_idx: InGroupIndex = grp.len();
-
-        grp.push((element.clone(), weight));
-        self.pos_map_.insert(element.clone(), (grp_idx, in_grp_idx));
-
-        self.sampling_tree_.update_value(weight, Some(grp_idx));
-
-        Ok(true)
-    }
-
-    // TODO add optimization for the case where weight results in no change
-    // and mutate in place
-    /// Sets the weight of a node.
-    /// If the node does not exist, functionally the same as insert.
-    /// 
-    /// Returns [SSetError::WeightOutOfRange] if the weight is invalid.
-    pub fn set_weight(&mut self, element: &T, weight: f64) -> SSetResult<()> {
-        match self.weight_check(weight) {
-            Ok(()) => {
-                let _ = self.erase(element);
-                // Weight has already been checked, and we know the 
-                // key does not exist since we just removed it, so 
-                // we can ignore the return type of insert().
-                // However, insert is part of the public API so keeping
-                // the return type is a good idea so that users can know if an 
-                // insertion failed.
-                self.insert(element, weight)?;
-            }
-            Err(e) => return Err(e),
-        }
-
-        Ok(())
-    }
-
-    /// Erases an element from the set, if it exists.
-    /// 
-    /// Returns `true` on element removed, 
-    /// `false` if element was not found.
-    pub fn erase(&mut self, element: &T) -> bool {
-        let (grp_idx, in_grp_idx) = match self.pos_map_.get(element) {
-            Some(&pos) => pos,
-            // Element does not exist
-            None => return false,
-        };
-
-        let grp = &mut self.propensity_group_vec_[grp_idx];
-        let w_old = grp[in_grp_idx].1;
-
-        self.sampling_tree_.update_value(-w_old, Some(grp_idx));
-
-        let last_idx = grp.len() - 1;
-        // TODO return an error if trying to remove last element?
-        if in_grp_idx != last_idx {
-            let moved_key = grp[last_idx].0.clone();
-            grp.swap(in_grp_idx, last_idx);
-            self.pos_map_.insert(moved_key, (grp_idx, in_grp_idx));
-        }
-
-        grp.pop();
-        self.pos_map_.remove(element);
-
-        return true
-    }
-
     /// Clears all elements from the set.
     pub fn clear(&mut self) {
         self.sampling_tree_.clear();
@@ -438,7 +474,7 @@ where
     /// Checks that the weight is within the allowed bounds.
     /// 
     /// Returns SSetError::WeightOutOfRange if the weight is invalid.
-    fn weight_check(&self, weight: f64) -> SSetResult<()> {
+    fn weight_check(&self, weight: f64) -> SSetResult<(), K> {
         if weight < self.min_weight_ || weight > self.max_weight_ {
             Err(SSetError::WeightOutOfRange {
                 w: weight,
@@ -450,10 +486,14 @@ where
         }
     }
 
-    // TODO expose publicly?
-    #[allow(dead_code)]
-    fn seed(&mut self, seed: u64) {
-        self.rng_ = RNGType::seed_from_u64(seed);
+    /// Internal helper to get a random `f64` in a range
+    /// using either shared or independent RNG depending on 
+    /// the feature flag.
+    fn random_range(&mut self, range: std::ops::Range<f64>) -> f64 {
+        #[cfg(feature = "share_rng")]
+        GEN.with(|g| g.borrow_mut().random_range(range));
+        #[cfg(not(feature = "share_rng"))]
+        self.rng_.random_range(range)
     }
 }
 
@@ -483,7 +523,7 @@ where
 
 impl<T> SamplableSet<T>
 where
-    T: Clone + Eq + Hash,
+    T: Clone + fmt::Debug +  Eq + Hash,
 {
     /// Returns an iterator that lazily samples `n` items from the set
     /// using the built in random number generator.
@@ -559,7 +599,7 @@ where
 /// This iterator will yield a fixed number of samples from the set.
 pub struct SamplingIter<'a, T>
 where
-    T: Clone + Eq + Hash,
+    T: Clone + fmt::Debug + Eq + Hash,
 {
     set: &'a mut SamplableSet<T>,
     remaining: usize,
@@ -567,7 +607,7 @@ where
 
 impl<'a, T> Iterator for SamplingIter<'a, T>
 where
-    T: Clone + Eq + Hash,
+    T: Clone + fmt::Debug + Eq + Hash,
 {
     type Item = (T, f64);
 
@@ -589,7 +629,7 @@ where
 /// This iterator will yield a fixed number of samples from the set.
 pub struct SamplingIterExt<'a, T, R>
 where
-    T: Clone + Eq + Hash,
+    T: Clone + fmt::Debug + Eq + Hash,
     R: Rng + ?Sized + 'a,
 {
     set: &'a mut SamplableSet<T>,
@@ -599,7 +639,7 @@ where
 
 impl<'a, T, R> Iterator for SamplingIterExt<'a, T, R>
 where
-    T: Clone + Eq + Hash,
+    T: Clone + fmt::Debug + Eq + Hash,
     R: Rng + ?Sized + 'a,
 {
     type Item = (T, f64);
@@ -634,7 +674,10 @@ mod tests {
     fn insert_erase_and_totals() {
         let mut s = SamplableSet::<i32>::new(1.0, 8.0).unwrap();
         // set fixed internal RNG for this test
-        s.rng_ = RNGType::seed_from_u64(42);
+        #[cfg(not(feature = "share_rng"))]
+        { s.rng_ = RNGType::seed_from_u64(42); }
+        #[cfg(feature = "share_rng")]
+        { seed_static_gen(42); }
 
         let a = 1;
         let b = 2;
@@ -657,7 +700,10 @@ mod tests {
     #[test]
     fn get_weight_and_exists() {
         let mut s = SamplableSet::<&'static str>::new(1.0, 8.0).unwrap();
-        s.rng_ = RNGType::seed_from_u64(7);
+        #[cfg(not(feature = "share_rng"))]
+        { s.rng_ = RNGType::seed_from_u64(7); }
+        #[cfg(feature = "share_rng")]
+        { seed_static_gen(7); }
 
         let _ = s.insert(&"apple", 3.0);
         let _ = s.insert(&"banana", 5.0);
@@ -684,7 +730,10 @@ mod tests {
     fn sampling_distribution_matches_weights_basic() {
         // weights 1:2:5 -> probabilities 1/8, 2/8, 5/8
         let mut s = SamplableSet::<usize>::new(1.0, 8.0).unwrap();
-        s.rng_ = RNGType::seed_from_u64(123);
+        #[cfg(not(feature = "share_rng"))]
+        { s.rng_ = RNGType::seed_from_u64(123); }
+        #[cfg(feature = "share_rng")]
+        { seed_static_gen(123); }
         let _ = s.insert(&0, 1.0);
         let _ = s.insert(&1, 2.0);
         let _ = s.insert(&2, 5.0);
@@ -728,7 +777,10 @@ mod tests {
     #[test]
     fn sampling_iterator_yields_n_items() {
         let mut s = SamplableSet::<i32>::new(1.0, 8.0).unwrap();
-        s.rng_ = RNGType::seed_from_u64(9);
+        #[cfg(not(feature = "share_rng"))]
+        { s.rng_ = RNGType::seed_from_u64(9); }
+        #[cfg(feature = "share_rng")]
+        { seed_static_gen(9); }
         let _ = s.insert(&1, 3.0);
         let _ = s.insert(&2, 5.0);
 
@@ -740,7 +792,10 @@ mod tests {
     #[test]
     fn single_group_sampling_is_safe() {
         let mut s = SamplableSet::<u64>::new(1.0, 1.5).unwrap(); // R < 2 -> 1 group
-        s.rng_ = RNGType::seed_from_u64(123);
+        #[cfg(not(feature = "share_rng"))]
+        { s.rng_ = RNGType::seed_from_u64(123); }
+        #[cfg(feature = "share_rng")]
+        { seed_static_gen(123); }
 
         let _ = s.insert(&10, 1.0);
         let _ = s.insert(&20, 1.2);
@@ -755,7 +810,10 @@ mod tests {
     #[test]
     fn power_of_two_span_is_safe() {
         let mut s = SamplableSet::<u64>::new(1.0, 8.0).unwrap(); // ratio = 8 (power of two)
-        s.rng_ = RNGType::seed_from_u64(7);
+        #[cfg(not(feature = "share_rng"))]
+        { s.rng_ = RNGType::seed_from_u64(7); }
+        #[cfg(feature = "share_rng")]
+        { seed_static_gen(7); }
 
         // put something in each group (your insert hashes by weight)
         let _ = s.insert(&1, 1.0);
@@ -771,7 +829,10 @@ mod tests {
     #[test]
     fn clear_then_resample_is_safe() {
         let mut s = SamplableSet::<u64>::new(1.0, 8.0).unwrap();
-        s.rng_ = RNGType::seed_from_u64(42);
+        #[cfg(not(feature = "share_rng"))]
+        { s.rng_ = RNGType::seed_from_u64(42); }
+        #[cfg(feature = "share_rng")]
+        { seed_static_gen(42); }
         let _ = s.insert(&1, 3.0);
         let _ = s.insert(&2, 5.0);
 
@@ -790,7 +851,10 @@ mod tests {
     #[test]
     fn mutate_and_sample_fuzz_is_safe() {
         let mut s = SamplableSet::<u64>::new(0.5, 10.0).unwrap();
-        s.rng_ = rand_pcg::Pcg32::seed_from_u64(999);
+        #[cfg(not(feature = "share_rng"))]
+        { s.rng_ = RNGType::seed_from_u64(999); }
+        #[cfg(feature = "share_rng")]
+        { seed_static_gen(999); }
 
         for k in 0..50 {
             let _ = s.insert(&k, 0.5 + ((k as f64) % 10.0));
