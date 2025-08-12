@@ -1,6 +1,6 @@
 [package]
 name = "samplableset-rs"
-version = "0.7.0" # TODO bump to 0.8.0 after adding PyO3 support
+version = "0.8.0"
 edition = "2024"
 
 [lib]
