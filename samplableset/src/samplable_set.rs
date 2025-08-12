@@ -383,20 +383,18 @@ where
         let grp_idx: GroupIndex = self.sampling_tree_.get_leaf_idx(Some(r));
 
         // In valid structure, groups indexed by leaves are non-empty
-        let grp = &self.propensity_group_vec_[grp_idx];
-        let grp_len = grp.len();
+        let m_k = self.max_propensity_vec_[grp_idx];
+        let grp_len = self.propensity_group_vec_[grp_idx].len();
         if grp_len == 0 {
             // If this ever happens, the tree/groups are out of sync.
             return Err(SSetError::InconsistentState("Empty group"));
         }
-
-        let m_k = self.max_propensity_vec_[grp_idx];
         loop {
             let u: f64 = self.random_range(0.0..grp_len as f64);
             let in_grp_idx: InGroupIndex = (u as f64).floor() as InGroupIndex;
 
             let (elem, weight) = {
-                let (e, w) = &grp[in_grp_idx];
+                let (e, w) = &self.propensity_group_vec_[grp_idx][in_grp_idx];
                 (e.clone(), *w)
             };
 
@@ -491,10 +489,9 @@ where
     /// Internal helper to get a random `f64` in a range
     /// using either shared or independent RNG depending on 
     /// the feature flag.
-    fn random_range(&self, range: std::ops::Range<f64>) -> f64 {
+    fn random_range(&mut self, range: std::ops::Range<f64>) -> f64 {
         #[cfg(feature = "share_rng")]
-        let r: f64 = GEN.with(|g| g.borrow_mut().random_range(range));
-        return r;
+        GEN.with(|g| g.borrow_mut().random_range(range));
         #[cfg(not(feature = "share_rng"))]
         self.rng_.random_range(range)
     }
