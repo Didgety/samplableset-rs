@@ -1,7 +1,18 @@
 [package]
 name = "samplableset-rs"
-version = "0.7.0"
+version = "0.7.0" # TODO bump to 0.8.0 after adding PyO3 support
 edition = "2024"
+
+[lib]
+name = "samplableset_rs"
+# This could be adjusted to only compile rlib unless 
+# py_bind or c_bind is enabled using a build.rs script
+# However it would be an extremely hacky build script
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["share_rng"]
+share_rng = []
 
 [dependencies]
 rand = "0.9"

@@ -54,6 +54,6 @@ bucket ops
 ```toml
 # Cargo.toml
 [dependencies]
-samplable-set = { git = "https://github.com/<you>/samplable-set-rs" }
+samplableset-rs = { git = "https://github.com/<you>/samplableset-rs/samplableset" }
 ```
 Where `<you>` is either the main repository or your fork
