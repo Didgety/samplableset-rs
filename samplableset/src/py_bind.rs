@@ -22,8 +22,7 @@
 
 use pyo3::prelude::*;
 use pyo3::exceptions::{PyKeyError, PyValueError};
-use pyo3::types::PyAny;
-use pyo3::types::PyAnyMethods; // This import brings the extract method into scope
+use pyo3::types::{PyAny, PyList, PyTuple};
 use std::fmt;
 
 use crate::samplable_set::{SamplableSet, SSetError};
@@ -137,7 +136,7 @@ macro_rules! sset_variants {
                 }
             }
 
-            fn sample_py<'py>(&mut self, py: Python<'py>) -> PyResult<(PyObject, f64)> {
+            fn sample<'py>(&mut self, py: Python<'py>) -> PyResult<(PyObject, f64)> {
                 match self {
                     $( Inner::$Variant(s) => {
                         match s.sample()? {
@@ -202,10 +201,110 @@ sset_variants! {
     ((String, String, String), Tuple3Str, "tuple3str"),
 }
 
-// #[pyclass(
-//     module = "samplableset",
-//     name = "SamplableSet"
-// )]
-// pub struct PySamplableSet {
-//     inner: Inner,
-// }
+#[pyclass(
+    module = "samplableset",
+    name = "SamplableSet",
+    // There is really no reason to send a SamplableSet across threads
+    // at this time (and it would also break the `shared_rng` guarantee, 
+    // which only applies per thread). 
+    // This would require refactoring NodeRef and WeakNodeRef
+    // to use something like Arc<parking_lot::Mutex<T>> or Arc<std::sync::RwLock<T>>
+    // as well as a refactor of the static RNG logic.
+    // A potential solution to the RNG logic could involve creating a singleton 
+    // instance using something like OnceLock.
+    unsendable,
+)]
+struct PySamplableSet {
+    inner: Inner,
+}
+
+#[pymethods]
+impl PySamplableSet {
+    #[new]
+    pub fn new(kind: &str, w_min: f64, w_max: f64) -> PyResult<Self> {
+        let inner = Inner::new(kind, w_min, w_max)?;
+        Ok(PySamplableSet { inner })
+    }
+
+    #[pyo3(name = "size")]
+    fn py_size(&self) -> usize {
+        self.inner.size()
+    }
+
+    #[pyo3(name = "empty")]
+    fn py_empty(&self) -> bool {
+        self.inner.empty()
+    }
+
+    #[pyo3(name = "exists")]
+    fn py_exists(&self, key: &Bound<'_, PyAny>) -> PyResult<bool> {
+        self.inner.exists(key)
+    }
+
+    #[pyo3(name = "total_weight")]
+    fn py_total_weight(&self) -> f64 {
+        self.inner.total_weight()
+    }
+
+    #[pyo3(name = "get_weight")]
+    fn py_get_weight(&self, key: &Bound<'_, PyAny>) -> PyResult<f64> {
+        self.inner.get_weight(key)
+    }
+
+    #[pyo3(name = "insert")]
+    fn py_insert(&mut self, key: &Bound<'_, PyAny>, weight: f64) -> PyResult<bool> {
+        self.inner.insert(key, weight)
+    }
+
+    #[pyo3(name = "set_weight")]
+    fn py_set_weight(&mut self, key: &Bound<'_, PyAny>, weight: f64) -> PyResult<()> {
+        self.inner.set_weight(key, weight)
+    }
+
+    #[pyo3(name = "erase")]
+    fn py_erase(&mut self, key: &Bound<'_, PyAny>) -> PyResult<bool> {
+        self.inner.erase(key)
+    }
+
+    #[pyo3(name = "seed")]
+    fn py_seed(&mut self, seed: u64) {
+        self.inner.seed(seed)
+    }
+
+    #[pyo3(name = "sample")]
+    fn py_sample<'py>(&mut self, py: Python<'py>) -> PyResult<(PyObject, f64)> {
+        self.inner.sample(py)
+    }
+
+    #[pyo3(name = "clear")]
+    fn py_clear(&mut self) {
+        self.inner.clear()
+    }
+
+    // fn __iter__(slf: PyRefMut<'_, Self>, py: Python<'_>) -> PyResult<Py<PyAny>> {
+    //     let items = slf.inner.snapshot_items(py)?;
+    //     let mut tuples = Vec::with_capacity(items.len());
+    //     for (k, w) in items.iter() {
+    //         let w_obj = w.into_pyobject(py)?;
+    //         tuples.push(PyTuple::new(py, &[k.clone_ref(py), w_obj]));
+    //     }
+    //     let list = PyList::new(py, &tuples);
+    //     let iter = list.as_ref().call_method0("__iter__")?;
+    //     Ok(iter.unbind())
+    // }
+
+    fn __contains__(&self, item: &Bound<'_, PyAny>) -> PyResult<bool> {
+        self.inner.exists(item)
+    }
+
+    fn __len__(&self) -> usize {
+        self.py_size()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "SamplableSet(kind={}, size={}, total_weight={})",
+            self.inner.kind_str(), self.inner.size(), self.inner.total_weight()
+        )
+    }
+}
