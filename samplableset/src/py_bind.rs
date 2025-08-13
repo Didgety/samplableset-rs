@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use pyo3::prelude::*;
+use pyo3::{prelude::*, IntoPyObjectExt};
 use pyo3::exceptions::{PyKeyError, PyValueError};
 use pyo3::types::{PyAny, PyList, PyTuple};
 use std::fmt;
@@ -177,6 +177,8 @@ macro_rules! sset_variants {
                 }
             }
 
+            // TODO find a way to create these types without needing to pass 
+            // an explicit type via a string in Python
             #[inline]
             fn kind_str(&self) -> &'static str {
                 match self { $( Inner::$Variant(_) => $kind_str, )+ }
@@ -281,17 +283,28 @@ impl PySamplableSet {
         self.inner.clear()
     }
 
-    // fn __iter__(slf: PyRefMut<'_, Self>, py: Python<'_>) -> PyResult<Py<PyAny>> {
-    //     let items = slf.inner.snapshot_items(py)?;
-    //     let mut tuples = Vec::with_capacity(items.len());
-    //     for (k, w) in items.iter() {
-    //         let w_obj = w.into_pyobject(py)?;
-    //         tuples.push(PyTuple::new(py, &[k.clone_ref(py), w_obj]));
-    //     }
-    //     let list = PyList::new(py, &tuples);
-    //     let iter = list.as_ref().call_method0("__iter__")?;
-    //     Ok(iter.unbind())
-    // }
+    fn __iter__(slf: PyRefMut<'_, Self>, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let items = slf.inner.snapshot_items(py)?;
+
+        let rows: Vec<_> = items
+            .iter()
+            .map(|(k, w)| {
+                Ok(PyTuple::new(py, &[k.clone_ref(py), w.into_py_any(py)?])?)
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        let list = PyList::new(py, &rows);
+
+        // let mut tuples = Vec::with_capacity(items.len());
+        // for (k, w) in items.iter() {
+        //     tuples.push(
+        //         PyTuple::new(py, &[k.clone_ref(py), w.into_py_any(py)?])
+        //             .unwrap());
+        // }
+        // let list = PyList::new(py, &tuples);
+        
+        let iter = list.as_ref().unwrap().call_method0("__iter__")?;
+        Ok(iter.unbind())
+    }
 
     fn __contains__(&self, item: &Bound<'_, PyAny>) -> PyResult<bool> {
         self.inner.exists(item)
