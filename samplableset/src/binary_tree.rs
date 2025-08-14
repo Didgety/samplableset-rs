@@ -24,8 +24,8 @@ use std::{
     // cell::RefCell,
     collections::HashMap,
     ops::Deref,
-    //rc::{Rc, Weak}, 
-    sync::{Arc, Weak, RwLock},
+    //rc::{Rc, Weak},
+    sync::{Arc, RwLock, Weak},
 };
 
 type LeafIdx = usize;
@@ -45,7 +45,7 @@ pub(crate) struct WeakNodeRef(Weak<RwLock<BTreeNode>>);
 impl NodeRef {
     #[doc(hidden)]
     /// Creates a new `NodeRef`.
-    /// 
+    ///
     /// Acts like a `Rc<RefCell<BTreeNode>>`
     pub(crate) fn new(node: BTreeNode) -> Self {
         NodeRef(Arc::new(RwLock::new(node)))
@@ -53,7 +53,7 @@ impl NodeRef {
 
     #[doc(hidden)]
     /// Downgrades the strong reference to a weak reference.
-    /// 
+    ///
     /// NodeRef -> WeakNodeRef
     pub(crate) fn downgrade(&self) -> WeakNodeRef {
         WeakNodeRef(Arc::downgrade(self))
@@ -73,7 +73,7 @@ impl Deref for NodeRef {
 impl WeakNodeRef {
     #[doc(hidden)]
     /// Creates a new, empty `WeakNodeRef`.
-    /// 
+    ///
     /// Acts like a `Weak<RefCell<BTreeNode>>`
     pub(crate) fn new() -> Self {
         WeakNodeRef(Weak::new())
@@ -81,7 +81,7 @@ impl WeakNodeRef {
 
     #[doc(hidden)]
     /// Upgrades the weak reference to a strong reference, if the node is still alive.
-    /// 
+    ///
     /// WeakNodeRef -> NodeRef
     pub(crate) fn upgrade(&self) -> Option<NodeRef> {
         self.0.upgrade().map(NodeRef)
@@ -167,7 +167,7 @@ impl BinaryTree {
 
     #[doc(hidden)]
     /// Returns the value of the current node.
-    /// 
+    ///
     /// Guaranteed to always return Something
     pub(crate) fn get_val(&self) -> f64 {
         self.cur_node_
@@ -178,30 +178,36 @@ impl BinaryTree {
 
     #[doc(hidden)]
     /// Returns the value of the left child.
-    /// 
+    ///
     /// This is guaranteed to always return Something
     pub(crate) fn get_left_val(&self) -> f64 {
         let left = {
-            let cur = self.cur_node_.as_ref()
-                .expect("BinaryTree invariant violated: cannot get left val: current node  is None");
+            let cur = self.cur_node_.as_ref().expect(
+                "BinaryTree invariant violated: cannot get left val: current node  is None",
+            );
             let c = cur.read().unwrap();
-            c.left.clone().expect("BinaryTree invariant violated: left child is missing")
+            c.left
+                .clone()
+                .expect("BinaryTree invariant violated: left child is missing")
         };
         left.read().unwrap().val
     }
 
     #[doc(hidden)]
     /// Returns the value of the right child.
-    /// 
+    ///
     /// Not used in current SamplableSet implementation
     /// But also guaranteed to always return Something
     #[allow(dead_code)]
     pub(crate) fn get_right_val(&self) -> f64 {
         let right = {
-            let cur = self.cur_node_.as_ref()
-                .expect("BinaryTree invariant violated: cannot get right val: current node is None");
+            let cur = self.cur_node_.as_ref().expect(
+                "BinaryTree invariant violated: cannot get right val: current node is None",
+            );
             let c = cur.read().unwrap();
-            c.right.clone().expect("BinaryTree invariant violated: right child is missing")
+            c.right
+                .clone()
+                .expect("BinaryTree invariant violated: right child is missing")
         };
         right.read().unwrap().val
     }
@@ -228,13 +234,13 @@ impl BinaryTree {
                 chosen_leaf
             }
             None => {
-                let n = self.cur_node_.as_ref()
-                    .expect("BinaryTree invariant violated: cannot get leaf index: current_node_ is None");
+                let n = self.cur_node_.as_ref().expect(
+                    "BinaryTree invariant violated: cannot get leaf index: current_node_ is None",
+                );
                 let key = Arc::as_ptr(n) as usize; //as *const RwLock<BTreeNode> as usize;
-                *self
-                    .leaves_idx_map_
-                    .get(&key)
-                    .expect("BinaryTree invariant violated: current_node_ is not a leaf (no leaf index)")
+                *self.leaves_idx_map_.get(&key).expect(
+                    "BinaryTree invariant violated: current_node_ is not a leaf (no leaf index)",
+                )
             }
         }
     }
@@ -249,9 +255,14 @@ impl BinaryTree {
     /// Current node becomes its left child
     pub(crate) fn move_down_left(&mut self) {
         let next = {
-            let cur = self.cur_node_.as_ref().expect("BinaryTree invariant violated: cannot move down left: current_node_ is None");
+            let cur = self.cur_node_.as_ref().expect(
+                "BinaryTree invariant violated: cannot move down left: current_node_ is None",
+            );
             let guard = cur.read().unwrap();
-            guard.left.clone().expect("BinaryTree invariant violated: cannot move down left: no left child")
+            guard
+                .left
+                .clone()
+                .expect("BinaryTree invariant violated: cannot move down left: no left child")
         };
         self.cur_node_ = Some(next);
     }
@@ -260,10 +271,13 @@ impl BinaryTree {
     /// Current node becomes its right child
     pub(crate) fn move_down_right(&mut self) {
         let next = {
-            let cur = self.cur_node_.as_ref()
-                .expect("BinaryTree invariant violated: cannot move down right: current_node_ is None");
+            let cur = self.cur_node_.as_ref().expect(
+                "BinaryTree invariant violated: cannot move down right: current_node_ is None",
+            );
             let guard = cur.read().unwrap();
-            guard.right.clone()
+            guard
+                .right
+                .clone()
                 .expect("BinaryTree invariant violated: cannot move down right: no right child")
         };
         self.cur_node_ = Some(next);
@@ -273,10 +287,14 @@ impl BinaryTree {
     /// Current node becomes its parent
     pub(crate) fn move_up(&mut self) {
         let next = {
-            let cur = self.cur_node_.as_ref()
+            let cur = self
+                .cur_node_
+                .as_ref()
                 .expect("BinaryTree invariant violated: cannot move up: current_node_ is None");
             let guard = cur.read().unwrap();
-            guard.parent.upgrade()
+            guard
+                .parent
+                .upgrade()
                 .expect("BinaryTree invariant violated: cannot move up: no parent")
         };
         self.cur_node_ = Some(next);
@@ -293,11 +311,9 @@ impl BinaryTree {
     pub(crate) fn update_value(&mut self, variation: f64, idx: Option<LeafIdx>) {
         match idx {
             Some(leaf_idx) => {
-                let node = self
-                    .leaves_
-                    .get(leaf_idx)
-                    .cloned()
-                    .expect("BinaryTree invariant violated: Cannot update value: invalid leaf index");
+                let node = self.leaves_.get(leaf_idx).cloned().expect(
+                    "BinaryTree invariant violated: Cannot update value: invalid leaf index",
+                );
                 self.cur_node_ = Some(node);
                 self._update_helper(variation);
             }
@@ -305,7 +321,9 @@ impl BinaryTree {
                 if self.is_leaf() {
                     self._update_helper(variation);
                 } else {
-                    println!("BinaryTree invariant violated: Cannot update value: current node is not a leaf");
+                    println!(
+                        "BinaryTree invariant violated: Cannot update value: current node is not a leaf"
+                    );
                 }
             }
         }
@@ -342,7 +360,8 @@ impl BinaryTree {
         self.cur_node_
             .as_ref()
             .expect("current node is None in update_zero")
-            .write().unwrap()
+            .write()
+            .unwrap()
             .val = 0.0;
         while !self.is_root() {
             self.move_up();
@@ -402,10 +421,7 @@ impl<T: Into<u32>> From<T> for BinaryTree {
     fn from(n_leaves: T) -> Self {
         let n_leaves: u32 = n_leaves.into();
         // n_leaves guaranteed to be > 0 by SamplableSet::new()
-        debug_assert!(
-            n_leaves >= 1,
-            "BinaryTree must have at least one leaf"
-        );
+        debug_assert!(n_leaves >= 1, "BinaryTree must have at least one leaf");
 
         // let n_leaves = n_leaves * 2 - 1;
 
@@ -424,12 +440,12 @@ impl<T: Into<u32>> From<T> for BinaryTree {
             .expect("Overflow calculating number of nodes");
 
         // Build subtrees (None when n_leaves == 1)
-        let left  = tree.branch(root.clone(), 1, n_nodes);
+        let left = tree.branch(root.clone(), 1, n_nodes);
         let right = tree.branch(root.clone(), 2, n_nodes);
 
         {
             let mut rb = root.write().unwrap();
-            rb.left  = left;
+            rb.left = left;
             rb.right = right;
         }
 

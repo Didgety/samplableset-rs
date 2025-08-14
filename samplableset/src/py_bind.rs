@@ -20,23 +20,24 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use pyo3::{prelude::*, IntoPyObjectExt};
 use pyo3::exceptions::{PyKeyError, PyValueError};
 use pyo3::types::{PyAny, PyList, PyTuple};
+use pyo3::{IntoPyObjectExt, prelude::*};
 use std::fmt;
 
-use crate::samplable_set::{SamplableSet, SSetError};
+use crate::samplable_set::{SSetError, SamplableSet};
 
 impl<K: fmt::Debug> From<SSetError<K>> for PyErr {
-    fn from(err: SSetError<K>) -> Self {        
+    fn from(err: SSetError<K>) -> Self {
         match err {
             SSetError::EmptySet => PyErr::new::<PyValueError, _>("The set is empty."),
             SSetError::InconsistentState(msg) => {
                 PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(msg)
             }
-            SSetError::KeyNotFound(key) => {
-                PyErr::new::<pyo3::exceptions::PyKeyError, _>(format!("Key not found in the set: {:?}", key))
-            }
+            SSetError::KeyNotFound(key) => PyErr::new::<pyo3::exceptions::PyKeyError, _>(format!(
+                "Key not found in the set: {:?}",
+                key
+            )),
             SSetError::WeightOutOfRange { w, min, max } => {
                 PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
                     "Weight {} is out of range [{}, {}]",
@@ -50,7 +51,7 @@ impl<K: fmt::Debug> From<SSetError<K>> for PyErr {
 // Declare all supported types in one pass
 macro_rules! sset_variants {
     ( $( ($ty:ty, $Variant:ident, $kind_str:literal) ),+ $(,)?) => {
-        
+
         enum Inner {
             $( $Variant(SamplableSet<$ty>), )+
         }
@@ -65,7 +66,7 @@ macro_rules! sset_variants {
                                 ::new(w_min, w_max)
                                 .map_err::<PyErr, _>(Into::into)?
                         )), )+
-                    _ => Err(PyErr::new::<PyValueError, _>(format!("Unsupported kind: {kind}, expected one of: {}", 
+                    _ => Err(PyErr::new::<PyValueError, _>(format!("Unsupported kind: {kind}, expected one of: {}",
                                                        [$( $kind_str ),+].join(", ")))),
                 }
             }
@@ -149,7 +150,7 @@ macro_rules! sset_variants {
                         }
                     } ),+
                 }
-            }            
+            }
 
             // fn sample_ext_rng<'py>(&mut self, py: Python<'py>) -> PyResult<(PyObject, f64)> {
             //     match self {
@@ -177,7 +178,7 @@ macro_rules! sset_variants {
                 }
             }
 
-            // TODO find a way to create these types without needing to pass 
+            // TODO find a way to create these types without needing to pass
             // an explicit type via a string in Python
             #[inline]
             fn kind_str(&self) -> &'static str {
@@ -289,9 +290,7 @@ impl PySamplableSet {
 
         let rows: Vec<_> = items
             .iter()
-            .map(|(k, w)| {
-                Ok(PyTuple::new(py, &[k.clone_ref(py), w.into_py_any(py)?])?)
-            })
+            .map(|(k, w)| PyTuple::new(py, &[k.clone_ref(py), w.into_py_any(py)?]))
             .collect::<PyResult<Vec<_>>>()?;
         let list = PyList::new(py, &rows).unwrap();
 
@@ -318,7 +317,9 @@ impl PySamplableSet {
     fn __repr__(&self) -> String {
         format!(
             "SamplableSet(kind={}, size={}, total_weight={})",
-            self.inner.kind_str(), self.inner.size(), self.inner.total_weight()
+            self.inner.kind_str(),
+            self.inner.size(),
+            self.inner.total_weight()
         )
     }
 }
