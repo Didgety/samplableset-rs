@@ -214,7 +214,7 @@ sset_variants! {
     // as well as a refactor of the static RNG logic.
     // A potential solution to the RNG logic could involve creating a singleton 
     // instance using something like OnceLock.
-    unsendable,
+    // unsendable,
 )]
 struct PySamplableSet {
     inner: Inner,
