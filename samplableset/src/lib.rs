@@ -35,9 +35,22 @@
 //! If $W$ is bounded in your application, operations are effectively
 //! $\mathcal{O}(1)$ on average.
 
+// Only compiles the module if py_bind feature is enabled
+#[cfg(feature = "py_bind")]
+mod py_bind;
+#[cfg(feature = "py_bind")]
+use pyo3::{pymodule, types::PyModule, Bound, PyResult};
 
 mod binary_tree;
 mod hash_propensity;
 pub mod samplable_set;
 
 pub use samplable_set::SamplableSet;
+
+#[cfg(feature = "py_bind")]
+#[pymodule]
+fn samplableset_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    py_bind::register_py(m)?;
+    
+    Ok(())
+}

@@ -204,7 +204,7 @@ sset_variants! {
 }
 
 #[pyclass(
-    module = "samplableset",
+    // module = "samplableset_rs",
     name = "SamplableSet",
     // There is really no reason to send a SamplableSet across threads
     // at this time (and it would also break the `shared_rng` guarantee, 
@@ -283,6 +283,7 @@ impl PySamplableSet {
         self.inner.clear()
     }
 
+    // TODO implement PySeqSamplableIter? This relies heavily on Python
     fn __iter__(slf: PyRefMut<'_, Self>, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let items = slf.inner.snapshot_items(py)?;
 
@@ -292,7 +293,7 @@ impl PySamplableSet {
                 Ok(PyTuple::new(py, &[k.clone_ref(py), w.into_py_any(py)?])?)
             })
             .collect::<PyResult<Vec<_>>>()?;
-        let list = PyList::new(py, &rows);
+        let list = PyList::new(py, &rows).unwrap();
 
         // let mut tuples = Vec::with_capacity(items.len());
         // for (k, w) in items.iter() {
@@ -301,8 +302,8 @@ impl PySamplableSet {
         //             .unwrap());
         // }
         // let list = PyList::new(py, &tuples);
-        
-        let iter = list.as_ref().unwrap().call_method0("__iter__")?;
+
+        let iter = list.call_method0("__iter__")?;
         Ok(iter.unbind())
     }
 
@@ -320,4 +321,9 @@ impl PySamplableSet {
             self.inner.kind_str(), self.inner.size(), self.inner.total_weight()
         )
     }
+}
+
+pub(crate) fn register_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<PySamplableSet>()?;
+    Ok(())
 }
