@@ -1,0 +1,22 @@
+# project field is automatically populated from Cargo.toml
+# https://www.maturin.rs/metadata#dynamic-metadata
+# [project]
+# name = "samplableset-rs"
+# readme = "README.md"
+# license = { text = "MIT" }
+# version = "0.8.0"
+
+[build-system]
+build-backend = "maturin"
+requires = ["maturin>=1.0,<2.0"]
+
+[tool.maturin]
+profile = "release"
+features = ["py_bind"]
+manifest-path = "Cargo.toml"
+bindings = "pyo3"
+# compatibility = pypi
+
+python-source = "python"
+# renames from samplableset_rs to _samplableset_rs
+# module-name = "samplableset_rs._samplableset_rs"

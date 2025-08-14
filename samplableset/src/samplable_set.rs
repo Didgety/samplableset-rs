@@ -42,7 +42,6 @@ type SSetResult<T, K> = Result<T, SSetError<K>>;
 
 type PropensityGroup<T> = Vec<(T, f64)>;
 
-// TODO add option for below
 // For consistency with original C++ implementation
 // All instances share the same rng stream (per thread)
 #[cfg(feature = "share_rng")]
@@ -344,11 +343,16 @@ where
         return true
     }
 
-    // TODO expose publicly?
-    #[cfg(not(feature = "share_rng"))]
-    #[allow(dead_code)]
+    /// Seeds the internal RNG given a u64 value
+    /// 
+    /// If the `share_rng` feature is enabled this 
+    /// will update the RNG for all instances of SamplableSet
     pub fn seed(&mut self, seed: u64) {
-        self.rng_ = RNGType::seed_from_u64(seed);
+        #[cfg(not(feature = "share_rng"))]
+        { self.rng_ = RNGType::seed_from_u64(seed); }
+        
+        #[cfg(feature = "share_rng")]
+        seed_static_gen(seed);
     }
 
     /// Draw one `(element, weight)` proportional to weight (with replacement).
