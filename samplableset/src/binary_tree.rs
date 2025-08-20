@@ -46,7 +46,7 @@ impl NodeRef {
     #[doc(hidden)]
     /// Creates a new `NodeRef`.
     ///
-    /// Acts like a `Rc<RefCell<BTreeNode>>`
+    /// Acts like an `Arc<RwLock<BTreeNode>>`
     pub(crate) fn new(node: BTreeNode) -> Self {
         NodeRef(Arc::new(RwLock::new(node)))
     }
@@ -74,7 +74,7 @@ impl WeakNodeRef {
     #[doc(hidden)]
     /// Creates a new, empty `WeakNodeRef`.
     ///
-    /// Acts like a `Weak<RefCell<BTreeNode>>`
+    /// Acts like a `Weak<RwLock<BTreeNode>>`
     pub(crate) fn new() -> Self {
         WeakNodeRef(Weak::new())
     }
