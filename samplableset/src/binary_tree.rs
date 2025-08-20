@@ -237,7 +237,8 @@ impl BinaryTree {
                 let n = self.cur_node_.as_ref().expect(
                     "BinaryTree invariant violated: cannot get leaf index: current_node_ is None",
                 );
-                let key = Arc::as_ptr(n) as usize; //as *const RwLock<BTreeNode> as usize;
+                // Use the raw pointer as a UID for the node. Safe because there is no dereferencing.
+                let key = Arc::as_ptr(n) as usize;
                 *self.leaves_idx_map_.get(&key).expect(
                     "BinaryTree invariant violated: current_node_ is not a leaf (no leaf index)",
                 )
@@ -405,7 +406,7 @@ impl BinaryTree {
 
             Some(child)
         } else {
-            let key = Arc::as_ptr(&parent) as *const _ as usize;
+            let key = Arc::as_ptr(&parent) as usize;
             if !self.leaves_idx_map_.contains_key(&key) {
                 let idx = self.leaves_.len() as LeafIdx;
                 self.leaves_idx_map_.insert(key, idx);
