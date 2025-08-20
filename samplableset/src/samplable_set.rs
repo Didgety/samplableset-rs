@@ -169,8 +169,8 @@ where
             return Err(SSetError::WeightOutOfRange {
                 w: min_weight,
                 // min weight must be > 0
-                min: 0.01,
-                max: f64::INFINITY,
+                min: f64::MIN_POSITIVE,
+                max: f64::MAX,
             });
         }
 
@@ -332,9 +332,7 @@ where
     /// will update the RNG for all instances of SamplableSet
     pub fn seed(&mut self, seed: u64) {
         #[cfg(not(feature = "share_rng"))]
-        {
-            self.rng_ = RNGType::seed_from_u64(seed);
-        }
+        self.rng_.seed_from_u64(seed);
 
         #[cfg(feature = "share_rng")]
         global_rng::seed_global(seed);
@@ -478,7 +476,8 @@ where
     /// the feature flag.
     fn random_range(&mut self, range: std::ops::Range<f64>) -> f64 {
         #[cfg(feature = "share_rng")]
-        return global_rng::with_rng(|rng| rng.random_range(range));
+        { global_rng::with_rng(|rng| rng.random_range(range)) }
+
         #[cfg(not(feature = "share_rng"))]
         self.rng_.random_range(range)
     }
@@ -669,10 +668,12 @@ mod global_rng {
     static GLOBAL_SEED: AtomicU64 = AtomicU64::new(0);
     static EPOCH: AtomicU64 = AtomicU64::new(0);
 
+    const UNINITIALIZED_EPOCH: u64 = u64::MAX;
+
     // (epoch seen,  rng)
     thread_local! {
         static GEN: RefCell<(u64, RNGType)> = 
-            RefCell::new((u64::MAX, RNGType::from_os_rng()));
+            RefCell::new((UNINITIALIZED_EPOCH, RNGType::from_os_rng()));
     }
 
     /// Helper function for maintaining shared RNG state
@@ -703,7 +704,7 @@ mod global_rng {
         F: FnOnce(&mut RNGType) -> T,
     {
         let epoch = EPOCH.load(Ordering::Acquire);
-        let global_seed = GLOBAL_SEED.load(Ordering::Relaxed);
+        let global_seed = GLOBAL_SEED.load(Ordering::Acquire);
 
         GEN.with(|cell| {
             let mut slot = cell.borrow_mut();
