@@ -32,9 +32,9 @@ pub(crate) struct HashPropensity {
 impl HashPropensity {
     #[doc(hidden)]
     /// Creates a new `HashPropensity`.
-    /// 
+    ///
     /// Valid conditions for creating a new HashPropensity are enforced by SamplableSet
-    /// 
+    ///
     /// - `propensity_min` must be positive and less than infinity
     /// - `propensity_max` must be finite and greater than `propensity_min`
     pub(crate) fn new(propensity_min: f64, propensity_max: f64) -> Self {
@@ -47,7 +47,7 @@ impl HashPropensity {
             "Propensity max must be finite and greater than min"
         );
 
-        let is_pow_two = is_pow_two_f64(propensity_max / propensity_min);        
+        let is_pow_two = is_pow_two_f64(propensity_max / propensity_min);
 
         HashPropensity {
             propensity_min_: propensity_min,
@@ -58,7 +58,7 @@ impl HashPropensity {
 
     #[doc(hidden)]
     /// Returns the index of the given propensity.
-    /// 
+    ///
     /// Valid conditions for using this function are enforced by SamplableSet
     ///
     /// - `propensity` must be finite and greater than zero
@@ -95,7 +95,7 @@ impl HashPropensity {
 /// mant = bits & ((1u64 << 52) - 1);
 /// exp != 0 && exp != 0x7ff && mant == 0
 /// ```
-/// 
+///
 /// Equivalent to
 /// ```ignore
 /// f64::floor(f64::log2(
@@ -108,7 +108,7 @@ impl HashPropensity {
 fn is_pow_two_f64(x: f64) -> bool {
     if !(x.is_finite()) || x <= 0.0 {
         return false;
-    }    
+    }
     (x.to_bits() & ((1u64 << 52) - 1)) == 0
 }
 

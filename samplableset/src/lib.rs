@@ -39,7 +39,7 @@
 #[cfg(feature = "py_bind")]
 mod py_bind;
 #[cfg(feature = "py_bind")]
-use pyo3::{pymodule, types::PyModule, Bound, PyResult};
+use pyo3::{Bound, PyResult, pymodule, types::PyModule};
 
 mod binary_tree;
 mod hash_propensity;
@@ -51,6 +51,6 @@ pub use samplable_set::SamplableSet;
 #[pymodule]
 fn samplableset_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     py_bind::register_py(m)?;
-    
+
     Ok(())
 }

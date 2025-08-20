@@ -23,9 +23,6 @@
 use rand::{Rng, SeedableRng};
 use rand_pcg::Pcg32 as RNGType;
 
-#[cfg(feature = "share_rng")]
-use std::cell::RefCell;
-
 use std::collections::HashMap;
 use std::fmt;
 use std::hash::Hash;
@@ -42,23 +39,6 @@ type SSetResult<T, K> = Result<T, SSetError<K>>;
 
 type PropensityGroup<T> = Vec<(T, f64)>;
 
-// For consistency with original C++ implementation
-// All instances share the same rng stream (per thread)
-#[cfg(feature = "share_rng")]
-thread_local! {
-    static GEN: RefCell<RNGType> = RefCell::new(RNGType::from_seed(rand::random()));
-}
-
-/// Private helper function for static GEN
-/// If any instance of SamplableSet calls this,
-/// RNG will be updated for **all** instances
-#[cfg(feature = "share_rng")]
-fn seed_static_gen(seed: u64) {
-    GEN.with(|g|
-    *g.borrow_mut() = RNGType::seed_from_u64(seed)
-    );
-}
-
 /// Errors that can occur within the sampling set.
 #[derive(Debug)]
 pub enum SSetError<K> {
@@ -67,7 +47,7 @@ pub enum SSetError<K> {
     /// Internal state is broken and invalid operations occurred or may occur
     InconsistentState(&'static str),
     /// Key not found in the set.
-    KeyNotFound(K),  
+    KeyNotFound(K),
     /// Weight is not within the bounds $$[w_{\min}, w_{\max}]$$
     WeightOutOfRange { w: f64, min: f64, max: f64 },
 }
@@ -90,7 +70,7 @@ impl<K: fmt::Debug> fmt::Display for SSetError<K> {
 ///
 /// This implements the composition–rejection sampler of
 /// St-Onge et al., *Comput. Phys. Commun.* 240 (2019) 30-37
-/// (DOI: [10.1016/j.cpc.2019.02.008](https://doi.org/10.1016/j.cpc.2019.02.008)), 
+/// (DOI: [10.1016/j.cpc.2019.02.008](https://doi.org/10.1016/j.cpc.2019.02.008)),
 /// specialized with **dyadic (power-of-two) propensity groups**.
 ///
 /// # Model
@@ -123,6 +103,7 @@ impl<K: fmt::Debug> fmt::Display for SSetError<K> {
 ///   $+$ $\mathcal{O}(1)$ expected for the rejection step.
 /// - **Insert / Erase / set\_weight:** update one group’s total in the tree
 ///   in $\mathcal{O}(\log G)$ and mutate one bucket in $\mathcal{O}(1)$.
+///
 /// If $W$ is bounded, these are effectively $\mathcal{O}(1)$ on average.
 ///
 /// # Edge cases & invariants
@@ -135,7 +116,7 @@ impl<K: fmt::Debug> fmt::Display for SSetError<K> {
 /// # Examples
 /// ```
 /// use samplableset_rs::SamplableSet;
-/// 
+///
 /// let mut s = SamplableSet::<u64>::new(1.0, 8.0).unwrap();
 /// s.insert(&1, 3.0).unwrap();
 /// s.insert(&2, 5.0).unwrap();
@@ -148,7 +129,7 @@ impl<K: fmt::Debug> fmt::Display for SSetError<K> {
 /// for (k, w) in &s {
 ///     // use k, w
 /// }
-/// 
+///
 /// // Create a sampling iterator and collect the samples
 /// let iter = s.into_sampling_iter(10000);
 /// let samples: Vec<_> = iter.collect();
@@ -164,7 +145,7 @@ where
     // Cloning results in identical behavior
     // because the state of RNG is preserved
     // when using #[derive(Clone)]
-    // TODO implement Clone manually and reinitialize the RNG
+    // TODO implement Clone manually and reinitialize the RNG when not using the `share_rng` feature
     #[cfg(not(feature = "share_rng"))]
     rng_: RNGType,
 
@@ -181,15 +162,15 @@ impl<K> SamplableSet<K>
 where
     K: Clone + Eq + Hash,
 {
-    /// Creates a new, empty [SamplableSet] with 
+    /// Creates a new, empty [SamplableSet] with
     /// $\lceil \log_2 \dfrac{w_{\max}}{w_{\min}} \rceil + 1$ groups.
     pub fn new(min_weight: f64, max_weight: f64) -> SSetResult<Self, PhantomData<K>> {
         if min_weight <= 0.0 || !max_weight.is_finite() || max_weight <= min_weight {
             return Err(SSetError::WeightOutOfRange {
                 w: min_weight,
                 // min weight must be > 0
-                min: 0.01,
-                max: f64::INFINITY,
+                min: f64::MIN_POSITIVE,
+                max: f64::MAX,
             });
         }
 
@@ -210,11 +191,13 @@ where
         let sampling_tree = BinaryTree::from(num_groups);
         let propensity_group_vec = vec![Vec::<(K, f64)>::new(); num_groups as usize];
 
-       Ok(SamplableSet {
+        Ok(SamplableSet {
             min_weight_: min_weight,
             max_weight_: max_weight,
+
             #[cfg(not(feature = "share_rng"))]
             rng_: RNGType::from_os_rng(),
+            
             hash_: hash,
             max_propensity_vec_: max_propensity_vec,
             pos_map_: HashMap::new(),
@@ -240,7 +223,7 @@ where
     }
 
     /// Returns the total weight of the set.
-    /// 
+    ///
     // The requirement that `cur_node_` be the root
     // is met by the implementation of the BinaryTree.
     pub fn total_weight(&self) -> f64 {
@@ -248,24 +231,24 @@ where
     }
 
     /// Returns the weight of the given element, if it exists.
-    /// 
+    ///
     /// You should use [SamplableSet::exists] to check if an element is in the set
     /// before trying to get its weight.
-    /// 
+    ///
     /// Returns [SSetError::KeyNotFound] if the element is not found.
     pub fn get_weight(&self, element: &K) -> SSetResult<f64, K> {
         let &(g, i) = self
             .pos_map_
             .get(element)
             .ok_or(SSetError::KeyNotFound(element.clone()))?;
-        Ok(self.propensity_group_vec_[g as usize][i as usize].1)
+        Ok(self.propensity_group_vec_[g][i].1)
     }
 
     /// Inserts an element into the set with the given weight.
-    /// 
-    /// Returns `true` on success, 
+    ///
+    /// Returns `true` on success,
     /// `false` on duplicate key.
-    /// 
+    ///
     /// Returns [SSetError::WeightOutOfRange] if the weight is invalid.
     pub fn insert(&mut self, element: &K, weight: f64) -> SSetResult<bool, K> {
         match self.weight_check(weight) {
@@ -293,17 +276,17 @@ where
     // and mutate in place
     /// Sets the weight of a node.
     /// If the node does not exist, functionally the same as insert.
-    /// 
+    ///
     /// Returns [SSetError::WeightOutOfRange] if the weight is invalid.
     pub fn set_weight(&mut self, element: &K, weight: f64) -> SSetResult<(), K> {
         match self.weight_check(weight) {
             Ok(()) => {
                 let _ = self.erase(element);
-                // Weight has already been checked, and we know the 
-                // key does not exist since we just removed it, so 
+                // Weight has already been checked, and we know the
+                // key does not exist since we just removed it, so
                 // we can ignore the return type of insert().
                 // However, insert is part of the public API so keeping
-                // the return type is a good idea so that users can know if an 
+                // the return type is a good idea so that users can know if an
                 // insertion failed.
                 self.insert(element, weight)?;
             }
@@ -314,8 +297,8 @@ where
     }
 
     /// Erases an element from the set, if it exists.
-    /// 
-    /// Returns `true` on element removed, 
+    ///
+    /// Returns `true` on element removed,
     /// `false` if element was not found.
     pub fn erase(&mut self, element: &K) -> bool {
         let (grp_idx, in_grp_idx) = match self.pos_map_.get(element) {
@@ -340,19 +323,19 @@ where
         grp.pop();
         self.pos_map_.remove(element);
 
-        return true
+        true
     }
 
     /// Seeds the internal RNG given a u64 value
-    /// 
-    /// If the `share_rng` feature is enabled this 
+    ///
+    /// If the `share_rng` feature is enabled this
     /// will update the RNG for all instances of SamplableSet
     pub fn seed(&mut self, seed: u64) {
         #[cfg(not(feature = "share_rng"))]
-        { self.rng_ = RNGType::seed_from_u64(seed); }
-        
+        self.rng_.seed_from_u64(seed);
+
         #[cfg(feature = "share_rng")]
-        seed_static_gen(seed);
+        global_rng::seed_global(seed);
     }
 
     /// Draw one `(element, weight)` proportional to weight (with replacement).
@@ -364,9 +347,9 @@ where
     /// $W = \dfrac{w_{\max}}{w_{\min}}$.
     ///
     /// For deterministic external RNG, use [SamplableSet::sample_ext_rng] instead.
-    /// 
+    ///
     /// ------
-    /// 
+    ///
     /// Returns `Ok((element, weight))` on success.
     ///
     /// Returns [SSetError::EmptySet] if the set is empty.
@@ -413,15 +396,15 @@ where
     /// Draw one `(element, weight)` using a **caller-supplied RNG**.
     ///
     /// Algorithm and guarantees are identical to [SamplableSet::sample], but the random draws
-    /// come from `generator`. 
+    /// come from `generator`.
     ///
     /// **Complexity:** $\mathcal{O}(\log\log W)$ expected, where
     /// $W = \dfrac{w_{\max}}{w_{\min}}$.
-    /// 
+    ///
     /// ------
-    /// 
+    ///
     /// Returns `Ok((element, weight))` on success.
-    /// 
+    ///
     /// Returns [SSetError::EmptySet] if the set is empty.
     pub fn sample_ext_rng<R>(&mut self, generator: &mut R) -> SSetResult<(K, f64), PhantomData<K>>
     where
@@ -470,13 +453,11 @@ where
         for grp in &mut self.propensity_group_vec_ {
             grp.clear();
         }
-
-        ()
     }
 
     #[doc(hidden)]
     /// Checks that the weight is within the allowed bounds.
-    /// 
+    ///
     /// Returns SSetError::WeightOutOfRange if the weight is invalid.
     fn weight_check(&self, weight: f64) -> SSetResult<(), K> {
         if weight < self.min_weight_ || weight > self.max_weight_ {
@@ -491,11 +472,12 @@ where
     }
 
     /// Internal helper to get a random `f64` in a range
-    /// using either shared or independent RNG depending on 
+    /// using either shared or independent RNG depending on
     /// the feature flag.
     fn random_range(&mut self, range: std::ops::Range<f64>) -> f64 {
         #[cfg(feature = "share_rng")]
-        GEN.with(|g| g.borrow_mut().random_range(range));
+        { global_rng::with_rng(|rng| rng.random_range(range)) }
+
         #[cfg(not(feature = "share_rng"))]
         self.rng_.random_range(range)
     }
@@ -527,7 +509,7 @@ where
 
 impl<T> SamplableSet<T>
 where
-    T: Clone + fmt::Debug +  Eq + Hash,
+    T: Clone + fmt::Debug + Eq + Hash,
 {
     /// Returns an iterator that lazily samples `n` items from the set
     /// using the built in random number generator.
@@ -599,7 +581,7 @@ where
 }
 
 /// A sampling iterator over the items in the set.
-/// 
+///
 /// This iterator will yield a fixed number of samples from the set.
 pub struct SamplingIter<'a, T>
 where
@@ -617,7 +599,7 @@ where
 
     /// Returns the next sampled item from the set
     /// using the built in random number generator
-    /// or None if there are no samples remaining 
+    /// or None if there are no samples remaining
     fn next(&mut self) -> Option<Self::Item> {
         if self.remaining == 0 {
             return None;
@@ -629,7 +611,7 @@ where
 
 /// A sampling iterator over the items in the set that
 /// takes an external RNG source.
-/// 
+///
 /// This iterator will yield a fixed number of samples from the set.
 pub struct SamplingIterExt<'a, T, R>
 where
@@ -668,20 +650,93 @@ where
     }
 }
 
+#[doc(hidden)]
+/// For consistency with original C++ implementation, 
+/// all instances share the same rng value.
+/// However, this approach **is** thread safe while the C++ 
+/// implementation is not.
+#[cfg(feature = "share_rng")]
+mod global_rng {
+    use super::*;
+    use std::{
+        cell::RefCell,
+        sync::{ 
+            atomic::{ AtomicU64, Ordering },
+        }
+    };
+
+    static GLOBAL_SEED: AtomicU64 = AtomicU64::new(0);
+    static EPOCH: AtomicU64 = AtomicU64::new(0);
+
+    const UNINITIALIZED_EPOCH: u64 = u64::MAX;
+
+    // (epoch seen,  rng)
+    thread_local! {
+        static GEN: RefCell<(u64, RNGType)> = 
+            RefCell::new((UNINITIALIZED_EPOCH, RNGType::from_os_rng()));
+    }
+
+    /// Helper function for maintaining shared RNG state
+    /// If any instance of SamplableSet calls this,
+    /// the `global seed` is updated and `epoch` advanced by one.
+    /// Other instances of `SamplableSet` are lazily re-seeded.
+    /// When they sample again, their RNG will be reseeded to the 
+    /// new global seed 
+    pub(crate) fn seed_global(seed: u64) {
+        GLOBAL_SEED.store(seed, Ordering::SeqCst);
+        EPOCH.fetch_add(1, Ordering::SeqCst);
+    }
+
+    #[doc(hidden)]
+    /// Execute a function with a mutable reference to the thread-local RNG.
+    /// 
+    /// Re-seeds the thread-local rng if the epoch has changed (which only
+    /// occurs when the seed is changed in an instance of `SamplableSet`)
+    /// 
+    /// ```ignore
+    /// global_rng::with_rng(|rng| {
+    ///     // Use the RNG here
+    /// });
+    /// ```
+    #[inline]
+    pub(crate) fn with_rng<F, T>(f: F) -> T
+    where 
+        F: FnOnce(&mut RNGType) -> T,
+    {
+        let epoch = EPOCH.load(Ordering::Acquire);
+        let global_seed = GLOBAL_SEED.load(Ordering::Acquire);
+
+        GEN.with(|cell| {
+            let mut slot = cell.borrow_mut();
+            if slot.0 != epoch {
+                slot.1 = RNGType::seed_from_u64(global_seed);
+                slot.0 = epoch;
+            }
+            f(&mut slot.1)
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn approx_eq(a: f64, b: f64, eps: f64) -> bool { (a - b).abs() <= eps }
+    fn approx_eq(a: f64, b: f64, eps: f64) -> bool {
+        (a - b).abs() <= eps
+    }
 
     #[test]
     fn insert_erase_and_totals() {
         let mut s = SamplableSet::<i32>::new(1.0, 8.0).unwrap();
         // set fixed internal RNG for this test
         #[cfg(not(feature = "share_rng"))]
-        { s.rng_ = RNGType::seed_from_u64(42); }
+        {
+            s.rng_ = RNGType::seed_from_u64(42);
+        }
         #[cfg(feature = "share_rng")]
-        { seed_static_gen(42); }
+        {
+            global_rng::seed_global(42);
+        }
 
         let a = 1;
         let b = 2;
@@ -705,9 +760,13 @@ mod tests {
     fn get_weight_and_exists() {
         let mut s = SamplableSet::<&'static str>::new(1.0, 8.0).unwrap();
         #[cfg(not(feature = "share_rng"))]
-        { s.rng_ = RNGType::seed_from_u64(7); }
+        {
+            s.rng_ = RNGType::seed_from_u64(7);
+        }
         #[cfg(feature = "share_rng")]
-        { seed_static_gen(7); }
+        {
+            global_rng::seed_global(7);
+        }
 
         let _ = s.insert(&"apple", 3.0);
         let _ = s.insert(&"banana", 5.0);
@@ -735,9 +794,13 @@ mod tests {
         // weights 1:2:5 -> probabilities 1/8, 2/8, 5/8
         let mut s = SamplableSet::<usize>::new(1.0, 8.0).unwrap();
         #[cfg(not(feature = "share_rng"))]
-        { s.rng_ = RNGType::seed_from_u64(123); }
+        {
+            s.rng_ = RNGType::seed_from_u64(123);
+        }
         #[cfg(feature = "share_rng")]
-        { seed_static_gen(123); }
+        {
+            global_rng::seed_global(123);
+        }
         let _ = s.insert(&0, 1.0);
         let _ = s.insert(&1, 2.0);
         let _ = s.insert(&2, 5.0);
@@ -749,7 +812,7 @@ mod tests {
             counts[k] += 1;
         }
 
-        let p = [1.0/8.0, 2.0/8.0, 5.0/8.0];
+        let p = [1.0 / 8.0, 2.0 / 8.0, 5.0 / 8.0];
         for i in 0..3 {
             let freq = counts[i] as f64 / n as f64;
             let sigma = (p[i] * (1.0 - p[i]) / n as f64).sqrt();
@@ -757,7 +820,8 @@ mod tests {
                 (freq - p[i]).abs() <= 5.0 * sigma,
                 // \u{03C3} = sigma
                 "bucket {i}: freq={freq:.6}, expected={:.6}, 5\u{03C3}={:.6}",
-                p[i], 5.0 * sigma
+                p[i],
+                5.0 * sigma
             );
         }
     }
@@ -782,9 +846,13 @@ mod tests {
     fn sampling_iterator_yields_n_items() {
         let mut s = SamplableSet::<i32>::new(1.0, 8.0).unwrap();
         #[cfg(not(feature = "share_rng"))]
-        { s.rng_ = RNGType::seed_from_u64(9); }
+        {
+            s.rng_ = RNGType::seed_from_u64(9);
+        }
         #[cfg(feature = "share_rng")]
-        { seed_static_gen(9); }
+        {
+            global_rng::seed_global(9);
+        }
         let _ = s.insert(&1, 3.0);
         let _ = s.insert(&2, 5.0);
 
@@ -797,9 +865,13 @@ mod tests {
     fn single_group_sampling_is_safe() {
         let mut s = SamplableSet::<u64>::new(1.0, 1.5).unwrap(); // R < 2 -> 1 group
         #[cfg(not(feature = "share_rng"))]
-        { s.rng_ = RNGType::seed_from_u64(123); }
+        {
+            s.rng_ = RNGType::seed_from_u64(123);
+        }
         #[cfg(feature = "share_rng")]
-        { seed_static_gen(123); }
+        {
+            global_rng::seed_global(123);
+        }
 
         let _ = s.insert(&10, 1.0);
         let _ = s.insert(&20, 1.2);
@@ -815,9 +887,13 @@ mod tests {
     fn power_of_two_span_is_safe() {
         let mut s = SamplableSet::<u64>::new(1.0, 8.0).unwrap(); // ratio = 8 (power of two)
         #[cfg(not(feature = "share_rng"))]
-        { s.rng_ = RNGType::seed_from_u64(7); }
+        {
+            s.rng_ = RNGType::seed_from_u64(7);
+        }
         #[cfg(feature = "share_rng")]
-        { seed_static_gen(7); }
+        {
+            global_rng::seed_global(7);
+        }
 
         // put something in each group (your insert hashes by weight)
         let _ = s.insert(&1, 1.0);
@@ -834,9 +910,13 @@ mod tests {
     fn clear_then_resample_is_safe() {
         let mut s = SamplableSet::<u64>::new(1.0, 8.0).unwrap();
         #[cfg(not(feature = "share_rng"))]
-        { s.rng_ = RNGType::seed_from_u64(42); }
+        {
+            s.rng_ = RNGType::seed_from_u64(42);
+        }
         #[cfg(feature = "share_rng")]
-        { seed_static_gen(42); }
+        {
+            global_rng::seed_global(42);
+        }
         let _ = s.insert(&1, 3.0);
         let _ = s.insert(&2, 5.0);
 
@@ -856,9 +936,13 @@ mod tests {
     fn mutate_and_sample_fuzz_is_safe() {
         let mut s = SamplableSet::<u64>::new(0.5, 10.0).unwrap();
         #[cfg(not(feature = "share_rng"))]
-        { s.rng_ = RNGType::seed_from_u64(999); }
+        {
+            s.rng_ = RNGType::seed_from_u64(999);
+        }
         #[cfg(feature = "share_rng")]
-        { seed_static_gen(999); }
+        {
+            global_rng::seed_global(999);
+        }
 
         for k in 0..50 {
             let _ = s.insert(&k, 0.5 + ((k as f64) % 10.0));
@@ -876,9 +960,13 @@ mod tests {
             let key: u64 = (r >> 32) % 60; // use high bits for variety
 
             match which {
-                0 => { s.erase(&key); },
+                0 => {
+                    s.erase(&key);
+                }
                 1 => s.set_weight(&key, 0.5 + ((key as f64) % 10.0)).unwrap(),
-                _ => { s.insert(&key, 0.5 + ((key as f64) % 10.0)).unwrap(); },
+                _ => {
+                    s.insert(&key, 0.5 + ((key as f64) % 10.0)).unwrap();
+                }
             }
 
             if !s.empty() {
@@ -897,7 +985,8 @@ mod tests {
         // get_val() should never panic
         let _ = s.sampling_tree_.get_val();
         // sampling shouldn’t panic either
-        for _ in 0..1000 { let _ = s.sample(); }
+        for _ in 0..1000 {
+            let _ = s.sample();
+        }
     }
-
 }
