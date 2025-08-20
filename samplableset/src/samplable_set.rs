@@ -715,11 +715,6 @@ mod global_rng {
             f(&mut slot.1)
         })
     }
-
-    // #[inline]
-    // pub fn global_random_range(range: std::ops::Range<f64>) -> f64 {
-    //     with_rng(|rng| rng.random_range(range))
-    // }
 }
 
 #[cfg(test)]
