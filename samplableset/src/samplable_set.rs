@@ -330,9 +330,11 @@ where
     ///
     /// If the `share_rng` feature is enabled this
     /// will update the RNG for all instances of SamplableSet
-    pub fn seed(&mut self, seed: u64) {
+        pub fn seed(&mut self, seed: u64) {
         #[cfg(not(feature = "share_rng"))]
-        self.rng_.seed_from_u64(seed);
+        {
+            self.rng_ = RNGType::seed_from_u64(seed);
+        }
 
         #[cfg(feature = "share_rng")]
         global_rng::seed_global(seed);
