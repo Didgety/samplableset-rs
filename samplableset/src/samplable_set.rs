@@ -23,9 +23,6 @@
 use rand::{Rng, SeedableRng};
 use rand_pcg::Pcg32 as RNGType;
 
-#[cfg(feature = "share_rng")]
-use std::cell::RefCell;
-
 use std::collections::HashMap;
 use std::fmt;
 use std::hash::Hash;
@@ -41,21 +38,6 @@ type SSetPosition = (GroupIndex, InGroupIndex);
 type SSetResult<T, K> = Result<T, SSetError<K>>;
 
 type PropensityGroup<T> = Vec<(T, f64)>;
-
-// For consistency with original C++ implementation
-// All instances share the same rng stream (per thread)
-#[cfg(feature = "share_rng")]
-thread_local! {
-    static GEN: RefCell<RNGType> = RefCell::new(RNGType::from_seed(rand::random()));
-}
-
-/// Private helper function for static GEN
-/// If any instance of SamplableSet calls this,
-/// RNG will be updated for **all** instances
-#[cfg(feature = "share_rng")]
-fn seed_static_gen(seed: u64) {
-    GEN.with(|g| *g.borrow_mut() = RNGType::seed_from_u64(seed));
-}
 
 /// Errors that can occur within the sampling set.
 #[derive(Debug)]
@@ -163,7 +145,7 @@ where
     // Cloning results in identical behavior
     // because the state of RNG is preserved
     // when using #[derive(Clone)]
-    // TODO implement Clone manually and reinitialize the RNG
+    // TODO implement Clone manually and reinitialize the RNG when not using the `share_rng` feature
     #[cfg(not(feature = "share_rng"))]
     rng_: RNGType,
 
@@ -212,8 +194,10 @@ where
         Ok(SamplableSet {
             min_weight_: min_weight,
             max_weight_: max_weight,
+
             #[cfg(not(feature = "share_rng"))]
             rng_: RNGType::from_os_rng(),
+            
             hash_: hash,
             max_propensity_vec_: max_propensity_vec,
             pos_map_: HashMap::new(),
@@ -353,7 +337,7 @@ where
         }
 
         #[cfg(feature = "share_rng")]
-        seed_static_gen(seed);
+        global_rng::seed_global(seed);
     }
 
     /// Draw one `(element, weight)` proportional to weight (with replacement).
@@ -494,7 +478,7 @@ where
     /// the feature flag.
     fn random_range(&mut self, range: std::ops::Range<f64>) -> f64 {
         #[cfg(feature = "share_rng")]
-        GEN.with(|g| g.borrow_mut().random_range(range));
+        return global_rng::with_rng(|rng| rng.random_range(range));
         #[cfg(not(feature = "share_rng"))]
         self.rng_.random_range(range)
     }
@@ -667,6 +651,76 @@ where
     }
 }
 
+#[doc(hidden)]
+/// For consistency with original C++ implementation, 
+/// all instances share the same rng value.
+/// However, this approach **is** thread safe while the C++ 
+/// implementation is not.
+#[cfg(feature = "share_rng")]
+mod global_rng {
+    use super::*;
+    use std::{
+        cell::RefCell,
+        sync::{ 
+            atomic::{ AtomicU64, Ordering },
+        }
+    };
+
+    static GLOBAL_SEED: AtomicU64 = AtomicU64::new(0);
+    static EPOCH: AtomicU64 = AtomicU64::new(0);
+
+    // (epoch seen,  rng)
+    thread_local! {
+        static GEN: RefCell<(u64, RNGType)> = 
+            RefCell::new((u64::MAX, RNGType::from_os_rng()));
+    }
+
+    /// Helper function for maintaining shared RNG state
+    /// If any instance of SamplableSet calls this,
+    /// the `global seed` is updated and `epoch` advanced by one.
+    /// Other instances of `SamplableSet` are lazily re-seeded.
+    /// When they sample again, their RNG will be reseeded to the 
+    /// new global seed 
+    pub(crate) fn seed_global(seed: u64) {
+        GLOBAL_SEED.store(seed, Ordering::SeqCst);
+        EPOCH.fetch_add(1, Ordering::SeqCst);
+    }
+
+    #[doc(hidden)]
+    /// Execute a function with a mutable reference to the thread-local RNG.
+    /// 
+    /// Re-seeds the thread-local rng if the epoch has changed (which only
+    /// occurs when the seed is changed in an instance of `SamplableSet`)
+    /// 
+    /// ```ignore
+    /// global_rng::with_rng(|rng| {
+    ///     // Use the RNG here
+    /// });
+    /// ```
+    #[inline]
+    pub(crate) fn with_rng<F, T>(f: F) -> T
+    where 
+        F: FnOnce(&mut RNGType) -> T,
+    {
+        let epoch = EPOCH.load(Ordering::Acquire);
+        let global_seed = GLOBAL_SEED.load(Ordering::Relaxed);
+
+        GEN.with(|cell| {
+            let mut slot = cell.borrow_mut();
+            if slot.0 != epoch {
+                slot.1 = RNGType::seed_from_u64(global_seed);
+                slot.0 = epoch;
+            }
+            f(&mut slot.1)
+        })
+    }
+
+    // #[inline]
+    // pub fn global_random_range(range: std::ops::Range<f64>) -> f64 {
+    //     with_rng(|rng| rng.random_range(range))
+    // }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -685,7 +739,7 @@ mod tests {
         }
         #[cfg(feature = "share_rng")]
         {
-            seed_static_gen(42);
+            global_rng::seed_global(42);
         }
 
         let a = 1;
@@ -715,7 +769,7 @@ mod tests {
         }
         #[cfg(feature = "share_rng")]
         {
-            seed_static_gen(7);
+            global_rng::seed_global(7);
         }
 
         let _ = s.insert(&"apple", 3.0);
@@ -749,7 +803,7 @@ mod tests {
         }
         #[cfg(feature = "share_rng")]
         {
-            seed_static_gen(123);
+            global_rng::seed_global(123);
         }
         let _ = s.insert(&0, 1.0);
         let _ = s.insert(&1, 2.0);
@@ -801,7 +855,7 @@ mod tests {
         }
         #[cfg(feature = "share_rng")]
         {
-            seed_static_gen(9);
+            global_rng::seed_global(9);
         }
         let _ = s.insert(&1, 3.0);
         let _ = s.insert(&2, 5.0);
@@ -820,7 +874,7 @@ mod tests {
         }
         #[cfg(feature = "share_rng")]
         {
-            seed_static_gen(123);
+            global_rng::seed_global(123);
         }
 
         let _ = s.insert(&10, 1.0);
@@ -842,7 +896,7 @@ mod tests {
         }
         #[cfg(feature = "share_rng")]
         {
-            seed_static_gen(7);
+            global_rng::seed_global(7);
         }
 
         // put something in each group (your insert hashes by weight)
@@ -865,7 +919,7 @@ mod tests {
         }
         #[cfg(feature = "share_rng")]
         {
-            seed_static_gen(42);
+            global_rng::seed_global(42);
         }
         let _ = s.insert(&1, 3.0);
         let _ = s.insert(&2, 5.0);
@@ -891,7 +945,7 @@ mod tests {
         }
         #[cfg(feature = "share_rng")]
         {
-            seed_static_gen(999);
+            global_rng::seed_global(999);
         }
 
         for k in 0..50 {
