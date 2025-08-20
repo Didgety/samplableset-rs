@@ -1,0 +1,8 @@
+samplableset-py/
+target/
+__pycache__/
+
+*.pyd
+# .gitignore
+# This is a library, so we don't want to dictate dependency versions
+Cargo.lock
